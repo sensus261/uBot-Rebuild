@@ -155,3 +155,272 @@ except:
 app.Shop = OpenBotHackbarDialog()
 KeyBot.instance.enableButton.SetOn()
 KeyBot.instance.Start()
+
+# Master debug switch: gates the phase-replay status chat below AND the diagnostics
+# ticker / Phase1Diag.txt further down. Keep False for release (no chat, no log file).
+PHASE1_DEBUG = False
+
+# --- Replay the game-phase event uBot's net.SetPhaseWindow hook missed ---
+# eXLib triggers script.py via in-game map-name detection, AFTER the login->game transition,
+# so uBot's net.SetPhaseWindow hook never saw PHASE_GAME and the phase callbacks that START
+# ActionBot / init Data.mainVID / arm Skillbot etc. never fired. Replay them once here.
+try:
+    import Hooks as _Hooks
+    _Hooks.CURRENT_PHASE = 5  # OpenLib.PHASE_GAME
+    for _cid in list(_Hooks.phaseCallbacks.keys()):
+        _cb = _Hooks.phaseCallbacks[_cid]
+        if callable(_cb):
+            try:
+                _cb(5, _Hooks.GAME_WINDOW)
+            except Exception as _e:
+                try:
+                    if PHASE1_DEBUG: chat.AppendChat(3, "[P1] phaseCB %s ERR: %s" % (str(_cid), str(_e)))
+                except:
+                    pass
+    try:
+        # _afterLoadPhase can fail on enableActionBot.SetOn() before reaching Start();
+        # start the executor explicitly so queued bot actions actually run.
+        if ActionBot.instance.State == 0:
+            ActionBot.instance.Start()
+        if PHASE1_DEBUG: chat.AppendChat(3, "[P1] phase-replay done; ActionBot.State=%s (expect 1)" % str(ActionBot.instance.State))
+    except Exception as _e2:
+        try:
+            if PHASE1_DEBUG: chat.AppendChat(3, "[P1] ActionBot start ERR: %s" % str(_e2))
+        except:
+            pass
+except Exception as _e:
+    try:
+        if PHASE1_DEBUG: chat.AppendChat(3, "[P1] phase-replay ERR: %s" % str(_e))
+    except:
+        pass
+
+# ============================ PHASE 1 DIAGNOSTICS ============================
+# Temporary instrumentation: logs which eXLib walker/instance methods work in-game.
+# Writes detail to <uBot>/Phase1Diag.txt and a 1-line summary to game chat.
+# Dumps once on load, then every ~8s (walk near NPCs/mobs to see InstancesList change).
+import time as _p1time
+_P1_LOG = eXLib.PATH + "\\Phase1Diag.txt"
+_p1_move_issued = [True]  # auto walk-test DISABLED (framework proven); set [False] to re-run it
+# PHASE1_DEBUG is defined above (before the phase-replay block) so it can gate that chat too.
+
+def _p1write(rows):
+    try:
+        f = open(_P1_LOG, "a")
+        for s in rows:
+            f.write(s + "\n")
+        f.close()
+    except:
+        pass
+
+def Phase1Diag():
+    out = ["===== PHASE1 DIAG t=" + str(_p1time.time()) + " ====="]
+    mapName = "?"
+    try:
+        mapName = background.GetCurrentMapName()
+        out.append("map = " + repr(mapName))
+    except Exception as e:
+        out.append("map ERR: " + str(e))
+    mainVID = 0
+    try:
+        mainVID = player.GetMainCharacterIndex()
+        out.append("mainVID(player.GetMainCharacterIndex) = " + repr(mainVID))
+    except Exception as e:
+        out.append("mainVID ERR: " + str(e))
+    try:
+        out.append("player.GetMainCharacterPosition() = " + repr(player.GetMainCharacterPosition()))
+    except Exception as e:
+        out.append("player.GetMainCharacterPosition ERR: " + str(e))
+    try:
+        out.append("chr.GetPixelPosition(mainVID)[eXLib] = " + repr(chr.GetPixelPosition(mainVID)))
+    except Exception as e:
+        out.append("chr.GetPixelPosition(main) ERR: " + str(e))
+    cnt = -1
+    vids = []
+    try:
+        il = eXLib.InstancesList
+        for v in il:
+            vids.append(v)
+        cnt = len(vids)
+        out.append("InstancesList type=" + type(il).__name__ + " count=" + str(cnt))
+        out.append("VIDs = " + repr(vids[:40]))
+        shown = 0
+        for vid in vids:
+            if shown >= 12:
+                break
+            shown += 1
+            row = "  vid=" + repr(vid)
+            try:
+                chr.SelectInstance(vid)
+                row += " race=" + repr(chr.GetRace())
+            except Exception as e:
+                row += " race_ERR=" + str(e)
+            try:
+                row += " name=" + repr(chr.GetNameByVID(vid))
+            except Exception as e:
+                row += " name_ERR=" + str(e)
+            try:
+                row += " dead=" + repr(eXLib.IsDead(vid))
+            except Exception as e:
+                row += " dead_ERR=" + str(e)
+            try:
+                row += " pos=" + repr(chr.GetPixelPosition(vid))
+            except Exception as e:
+                row += " pos_ERR=" + str(e)
+            out.append(row)
+    except Exception as e:
+        out.append("InstancesList ERR: " + str(e))
+    try:
+        dealer = None
+        for vid in vids:
+            try:
+                chr.SelectInstance(vid)
+                if chr.GetRace() == 9001:
+                    dealer = vid; break
+            except:
+                pass
+        if dealer is not None:
+            out.append("WEAPON DEALER(race 9001) vid=%s pos=%s" % (repr(dealer), repr(chr.GetPixelPosition(dealer))))
+        else:
+            out.append("WEAPON DEALER(race 9001) NOT in InstancesList")
+    except Exception as e:
+        out.append("dealer-find ERR: " + str(e))
+    try:
+        mp = player.GetMainCharacterPosition()
+        px = int(mp[0]); py = int(mp[1])
+        try:
+            path = eXLib.FindPath(px, py, px + 3000, py + 3000)
+            out.append("FindPath((%d,%d)->+3000) len=%d head=%s" % (px, py, len(path), repr(path[:3])))
+        except Exception as e:
+            out.append("FindPath ERR: " + str(e))
+        try:
+            out.append("IsPositionBlocked(my) = " + repr(eXLib.IsPositionBlocked(px, py)))
+        except Exception as e:
+            out.append("IsPositionBlocked ERR: " + str(e))
+    except Exception as e:
+        out.append("pos-for-path ERR: " + str(e))
+    # one-shot WALK TEST: exercise the FULL Movement framework (mapMovement -> Movement -> MoveToDestPosition)
+    try:
+        if (not _p1_move_issued[0]) and cnt > 0 and mainVID:
+            _p1_move_issued[0] = True
+            tgt = None
+            for _v in vids:
+                try:
+                    chr.SelectInstance(_v)
+                    if chr.GetRace() == 9001:
+                        _dp = chr.GetPixelPosition(_v); tgt = (int(_dp[0]), int(_dp[1])); break
+                except:
+                    pass
+            if tgt:
+                from OpenBot.Modules import Movement as _Mv
+                out.append("WALK TEST: Movement.GoToPositionAvoidingObjects(%d,%d) [walk to weapon dealer via framework]" % (tgt[0], tgt[1]))
+                _r = _Mv.GoToPositionAvoidingObjects(tgt[0], tgt[1])
+                out.append("WALK TEST returned: " + repr(_r))
+            else:
+                out.append("WALK TEST: no race-9001 dealer found")
+    except Exception as e:
+        out.append("WALK TEST ERR: " + repr(e))
+    # bot/framework states
+    try:
+        from OpenBot.Modules.Actions import ActionBot as _AB
+        from OpenBot.Modules import Movement as _MvS
+        _ca = _AB.instance.currActionObject
+        out.append("STATES: ActionBot.State=%s queue=%d curAction=%s | Movement.state=%s pathlen=%s" % (
+            str(_AB.instance.State), len(_AB.instance.currActionsQueue),
+            (_ca.function.__name__ if _ca else None),
+            str(_MvS.Movement.state), str(len(_MvS.Movement.path))))
+    except Exception as e:
+        out.append("STATES ERR: " + repr(e))
+    out.append("")
+    _p1write(out)
+    try:
+        chat.AppendChat(3, "[P1] map=%s instVids=%s mainVID=%s -> Phase1Diag.txt" % (str(mapName), str(cnt), str(mainVID)))
+    except:
+        pass
+
+class _Phase1DiagWindow(ui.ScriptWindow):
+    def __init__(self):
+        ui.ScriptWindow.__init__(self)
+        self.last = 0.0
+        self.Show()
+    def OnUpdate(self):
+        try:
+            now = _p1time.clock()
+            if now - self.last > 8.0:
+                self.last = now
+                Phase1Diag()
+        except:
+            pass
+
+def _DumpServerInfo():
+    # One-shot dump of the GF client's serverInfo + channel data so we can adapt
+    # ChannelSwitcher.GetChannels() to the real structure.
+    rows = ["===== SERVERINFO / CHANNEL DUMP ====="]
+    try:
+        import serverInfo as _si
+    except Exception as e:
+        rows.append("import serverInfo ERR: %r" % e); _p1write(rows); return
+    try:
+        from OpenBot.Modules import OpenLib as _OL
+        rows.append("OpenLib.GetCurrentServer() = %r" % (_OL.GetCurrentServer(),))
+        try:
+            rows.append("OpenLib.GetCurrentChannel() = %r" % (_OL.GetCurrentChannel(),))
+        except Exception as e:
+            rows.append("GetCurrentChannel ERR: %r" % e)
+    except Exception as e:
+        rows.append("OpenLib/GetCurrentServer ERR: %r" % e)
+    try:
+        rows.append("serverInfo attrs: %r" % [a for a in dir(_si) if not a.startswith('_')])
+    except Exception as e:
+        rows.append("dir(serverInfo) ERR: %r" % e)
+    for _name in ["REGION_DICT", "REGION_AUTH_SERVER_DICT", "MARKADDR_DICT", "REGION_NAME_DICT", "SERVER_DICT"]:
+        try:
+            v = getattr(_si, _name, "<MISSING>")
+            if isinstance(v, dict):
+                rows.append("%s: dict keys=%r" % (_name, list(v.keys())))
+                for k in list(v.keys())[:2]:
+                    sub = v[k]
+                    if isinstance(sub, dict):
+                        rows.append("  [%r]: dict keys=%r" % (k, list(sub.keys())))
+                        for k2 in list(sub.keys())[:3]:
+                            rows.append("    [%r][%r] = %r" % (k, k2, sub[k2]))
+                    else:
+                        rows.append("  [%r] = %r" % (k, sub))
+            else:
+                rows.append("%s = %r (%s)" % (_name, v, type(v).__name__))
+        except Exception as e:
+            rows.append("%s dump ERR: %r" % (_name, e))
+    try:
+        import net as _net
+        try:
+            rows.append("net.GetServerInfo() = %r" % (_net.GetServerInfo(),))
+        except Exception as e:
+            rows.append("net.GetServerInfo() ERR: %r" % e)
+        for _fn in ["GetServerInfo", "GetMainActorRace", "GetMainActorSkillGroup", "GetEmpireID", "GetMainActorVID"]:
+            rows.append("net.%s exists=%s" % (_fn, hasattr(_net, _fn)))
+    except Exception as e:
+        rows.append("net dump ERR: %r" % e)
+    try:
+        from OpenBot.Modules import Data as _D
+        rows.append("Data.serverInfo = %r" % (_D.serverInfo,))
+    except Exception as e:
+        rows.append("Data.serverInfo ERR: %r" % e)
+    _p1write(rows)
+
+if PHASE1_DEBUG:
+    try:
+        f = open(_P1_LOG, "w"); f.write("Phase1Diag log start\n"); f.close()
+    except:
+        pass
+    try:
+        _DumpServerInfo()
+    except Exception as e:
+        _p1write(["serverinfo-dump ERR: " + str(e)])
+    try:
+        Phase1Diag()  # one-shot immediately
+    except Exception as e:
+        _p1write(["one-shot ERR: " + str(e)])
+    try:
+        p1_diag_window = _Phase1DiagWindow()
+    except Exception as e:
+        _p1write(["diag-window ERR (timer off, one-shot only): " + str(e)])
+# ========================== END PHASE 1 DIAGNOSTICS ==========================

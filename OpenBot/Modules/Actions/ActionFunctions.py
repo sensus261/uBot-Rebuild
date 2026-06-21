@@ -252,7 +252,7 @@ def GetEnergyFromAlchemist(args):
     alchemist_id = args[1]
     position_x, position_y = args[2]
     if not OpenLib.isPlayerCloseToPosition(position_x, position_y):
-        action_dict = {'function_args': [(position_x, position_y), OpenLib.GetPlayerEmpireFirstMap()], # position
+        action_dict = {'function_args': [(position_x, position_y)], # use the CURRENT map: the alchemist is on the same map as the player. Passing GetPlayerEmpireFirstMap() broke this when empireID was unset (KeyError) or the player was off their empire's first map (wrong collision -> no path).
                         'function': MoveToPosition,
                         'requirements': { ActionRequirementsCheckers.IS_ON_POSITION: (position_x, position_y)}
                         }

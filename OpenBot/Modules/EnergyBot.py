@@ -189,6 +189,27 @@ class EnergyBot(BotBase):
 
 instance = EnergyBot()
 
+# EnergyBot money gate: GoBuyItemsFromNPC is interrupted (paused -> Action.NOTHING) whenever the
+# character has LESS than MIN_YANG_FOR_ENERGYBOT yang, because hasEnoughMoney(amount) returns True
+# when money < amount. Replace the silent interrupt with a throttled chat notice so the user knows
+# why the bot is idle.
+MIN_YANG_FOR_ENERGYBOT = 25000
+_last_money_notice = [0.0]
+
+def _NotifyNeedMoney():
+    try:
+        now = time.clock()
+        if now - _last_money_notice[0] > 5.0:
+            _last_money_notice[0] = now
+            try:
+                have = int(player.GetMoney())
+            except:
+                have = -1
+            chat.AppendChat(3, "[EnergyBot] Needs at least %d yang to run (you have %d). Paused until you have enough." % (MIN_YANG_FOR_ENERGYBOT, have))
+    except:
+        pass
+    return Action.NOTHING
+
 ENERGY_BOT_SCHEMA = {
     'requirements': {
         'maps': ['metin2_map_a1', 'metin2_map_b1', 'metin2_map_c1'],
@@ -200,8 +221,8 @@ ENERGY_BOT_SCHEMA = {
                         'function': ActionFunctions.GoBuyItemsFromNPC,
                         'requirements': {},
                         'interruptors': [ActionRequirementsCheckers.hasEnoughMoney],
-                        'interruptors_args': [25000],
-                        'interrupt_function': lambda: Action.NOTHING
+                        'interruptors_args': [MIN_YANG_FOR_ENERGYBOT],
+                        'interrupt_function': _NotifyNeedMoney
                         },
                         {'function_args': [ALL_GIVABLE_ITEMS, 20001, (62200, 51600)],
                         'function': ActionFunctions.GetEnergyFromAlchemist,
@@ -214,8 +235,8 @@ ENERGY_BOT_SCHEMA = {
                         'function': ActionFunctions.GoBuyItemsFromNPC,
                         'requirements': {},
                         'interruptors': [ActionRequirementsCheckers.hasEnoughMoney],
-                        'interruptors_args': [25000],
-                        'interrupt_function': lambda: Action.NOTHING
+                        'interruptors_args': [MIN_YANG_FOR_ENERGYBOT],
+                        'interrupt_function': _NotifyNeedMoney
                         },
                         {'function_args': [ALL_GIVABLE_ITEMS, 20001, (65900, 72800)],
                         'function': ActionFunctions.GetEnergyFromAlchemist,
@@ -228,8 +249,8 @@ ENERGY_BOT_SCHEMA = {
                         'function': ActionFunctions.GoBuyItemsFromNPC,
                         'requirements': {},
                         'interruptors': [ActionRequirementsCheckers.hasEnoughMoney],
-                        'interruptors_args': [25000],
-                        'interrupt_function': lambda: Action.NOTHING
+                        'interruptors_args': [MIN_YANG_FOR_ENERGYBOT],
+                        'interrupt_function': _NotifyNeedMoney
                         },
                         {'function_args': [ALL_GIVABLE_ITEMS, 20001, (29700, 81500)],
                         'function': ActionFunctions.GetEnergyFromAlchemist,

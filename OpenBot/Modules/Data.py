@@ -94,7 +94,6 @@ waithackState   = 0
 pickupState     = 0
 mobOnClickState = 0
 farmbotState    = 0
-fishbotState    = 0
 keybotState     = 0
 
 ########
@@ -106,11 +105,6 @@ time_DmgHacks_lastcloud     = 0
 time_DmgHacks_lastpotion    = 0
 time_DmgHacks_lasttime      = 0
 time_FarmingBot_lastTimeWaitingState= 0
-time_FishingBot_lasttime    = 0
-time_FishingBot_lastTimeWaitState   = 0
-time_FishingBot_lastTimeFishState   = 0
-time_FishingBot_lastTimeImprove     = 0
-time_FishingBot_lastTimeFire        = 0
 time_InventoryManager_lasttime      = 0
 time_KeyBot_timerBlock        = 0
 time_Movement_generalTimer  = 0
@@ -216,11 +210,6 @@ def resetTimers():
     Data.time_DmgHacks_lastpotion    = 5
     Data.time_DmgHacks_lasttime      = 5
     Data.time_FarmingBot_lastTimeWaitingState= 5
-    Data.time_FishingBot_lasttime    = 5
-    Data.time_FishingBot_lastTimeWaitState   = 5
-    Data.time_FishingBot_lastTimeFishState   = 5
-    Data.time_FishingBot_lastTimeImprove     = 5
-    Data.time_FishingBot_lastTimeFire        = 5
     Data.time_InventoryManager_lasttime      = 5
     Data.time_KeyBot_timerBlock        = 0
     Data.time_Movement_generalTimer  = 5

@@ -219,7 +219,7 @@ def GetServerInfo(channel):
 	"""
 	import serverInfo, Data
 	for serverNum in serverInfo.REGION_DICT[0].keys():
-		if serverInfo.REGION_DICT[0][serverNum]['name'] == Data.serverInfo.split(',')[0]:
+		if serverInfo.REGION_DICT[0][serverNum]['name'].strip() == net.GetServerInfo().split(',')[0].strip():
 			serverName = serverInfo.REGION_DICT[0][serverNum]['name']
 			channelName = serverInfo.REGION_DICT[0][serverNum]['channel'][channel]['name']
 			account_addr_new = serverInfo.REGION_AUTH_SERVER_DICT[0][serverNum]['ip']
@@ -739,7 +739,7 @@ def GetPlayerEmpireFirstMap():
 		2: 'metin2_map_b1',
 		3: 'metin2_map_c1',
 	}
-	return empires_map_names[empire_id]
+	return empires_map_names.get(empire_id, background.GetCurrentMapName())
 
 def GetPlayerEmpireSecondMap():
 	empire_id = Data.empireID
@@ -749,7 +749,7 @@ def GetPlayerEmpireSecondMap():
 		2: 'metin2_map_b3',
 		3: 'metin2_map_c3',
 	}
-	return empires_map_names[empire_id]	
+	return empires_map_names.get(empire_id, background.GetCurrentMapName())	
 
 #Return a tupple, the first value is true or false according if the timer has been reached, and the second value is the current timer
 #if first value is true or the old timer if false
@@ -841,14 +841,14 @@ def GetCurrentChannel():
 		[int]: Returns the channel, or 0 in case of an exception raised.
 	"""
 	try:
-		return int(Data.serverInfo.split(',')[1][3:])
+		return int(''.join(_c for _c in net.GetServerInfo().split(',')[1] if _c.isdigit()))
 	except:
 		OpenLog.DebugPrint("Exception raised when trying to obtain current channel.")
 		return 0
 
 def GetCurrentServer():
 	try:
-		return Data.serverInfo.split(',')[0]
+		return net.GetServerInfo().split(',')[0].strip()
 	except:
 		OpenLog.DebugPrint("Exception raised when trying to obtain current channel.")
 		return 0
@@ -1014,7 +1014,7 @@ class EterPackOperator(object):
 #LoadDictFile(CONFIG_PSHOP_AUTO_BUY,SEARCH_ITEMS_MAX_PRICE,float)
 FileManager.LoadDictFile(FileManager.CONFIG_BOSSES_ID, BOSS_IDS, int)
 FileManager.LoadDictFile(FileManager.CONFIG_ORES_ID, ORES_IDS, int)
-Hooks._debugHookFunctionArgs(event.SelectAnswer)
+# Hooks._debugHookFunctionArgs(event.SelectAnswer)  # debug-only: logged every dialog answer to debug.txt - disabled for release
 function_handler = TimeFunctionHandler()
 function_handler.Show()
 import Movement

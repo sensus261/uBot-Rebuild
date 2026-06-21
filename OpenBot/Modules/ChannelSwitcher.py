@@ -144,7 +144,7 @@ class ChannelSwitcher:
         region_id = self.GetRegionID()
         if server_name:
             for server in serverInfo.REGION_DICT[region_id].keys():
-                if serverInfo.REGION_DICT[region_id][server]['name'] == server_name:
+                if serverInfo.REGION_DICT[region_id][server]['name'].strip() == str(server_name).strip():
                     return int(server)
 
     def GetChannels(self):
@@ -155,8 +155,30 @@ class ChannelSwitcher:
 
         try:
             channelDict = serverInfo.REGION_DICT[region_id][server_id]['channel']
-        except:
-            chat.AppendChat(3, '[ChannelSwitcher] Error while get channels.')
+        except Exception as _ce:
+            # CHANNEL DIAG: the GF client likely structures serverInfo differently (or
+            # GetCurrentServer() doesn't match). Dump details to Log.txt so we can adapt.
+            try:
+                _srv = OpenLib.GetCurrentServer()
+            except Exception as _e0:
+                _srv = "GetCurrentServer ERR:" + str(_e0)
+            OpenLog.DebugPrint("[ChannelDiag] GetChannels FAILED: %r | region_id=%r server_id=%r GetCurrentServer=%r" % (_ce, region_id, server_id, _srv))
+            try:
+                OpenLog.DebugPrint("[ChannelDiag] REGION_DICT type=%s keys=%r" % (type(serverInfo.REGION_DICT).__name__, list(serverInfo.REGION_DICT.keys())))
+            except Exception as _e1:
+                OpenLog.DebugPrint("[ChannelDiag] REGION_DICT access ERR: " + str(_e1))
+            try:
+                _reg = serverInfo.REGION_DICT[region_id]
+                OpenLog.DebugPrint("[ChannelDiag] REGION_DICT[%r] type=%s keys=%r" % (region_id, type(_reg).__name__, list(_reg.keys())))
+                for _sk in list(_reg.keys())[:10]:
+                    try:
+                        _sv = _reg[_sk]
+                        OpenLog.DebugPrint("[ChannelDiag]   server %r: name=%r keys=%r channelKeys=%r" % (_sk, _sv.get('name'), list(_sv.keys()), list(_sv.get('channel', {}).keys())))
+                    except Exception as _e2:
+                        OpenLog.DebugPrint("[ChannelDiag]   server %r dump ERR: %s" % (_sk, _e2))
+            except Exception as _e3:
+                OpenLog.DebugPrint("[ChannelDiag] REGION_DICT[region] access ERR: " + str(_e3))
+            chat.AppendChat(3, '[ChannelSwitcher] Error while get channels. (details in Log.txt -> [ChannelDiag])')
             return
 
         for channelID, channelDataDict in channelDict.items():

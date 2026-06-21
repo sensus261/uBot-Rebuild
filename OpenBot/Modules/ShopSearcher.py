@@ -75,15 +75,28 @@ BOARD_SIZE_X = 300
 BOARD_SIZE_Y = 450
 
 
-def convertPrice(money,won=0):
+def formatYang(amount):
+	# Compact notation: k = thousand, kk = million; capped at kk so prices read like
+	# in-shop (e.g. 500,000,000 -> "500kk", 100,000 -> "100k", 1,000 -> "1k").
 	num = 0
-	_money = money+won*100000000
-	while _money>=1000:
-		_money = _money/1000
-		num+=1
-	_str ='k'
-	_money="{0:0.1f}".format(_money)
-	return str(_money) + str(_str*num)
+	val = float(amount)
+	while val >= 1000 and num < 2:
+		val = val/1000.0
+		num += 1
+	s = "{0:0.1f}".format(val)
+	if s.endswith(".0"):
+		s = s[:-2]
+	return s + ("k"*num)
+
+def convertPrice(yang,won=0):
+	# Show the shop's real Won + Yang split (1 Won = 100kk). An item can be both,
+	# e.g. won=5 + yang=50,000,000 -> "5Won 50kk"; won=0 + yang=500,000,000 -> "500kk".
+	parts = []
+	if won > 0:
+		parts.append("{0}Won".format(int(won)))
+	if yang > 0 or won == 0:
+		parts.append(formatYang(yang))
+	return " ".join(parts)
 
 
 def relativeEndY(Y_value):
@@ -142,14 +155,18 @@ class SearchDialog(ui.ScriptWindow):
 			return textLine	
 
 	class Item:
-		def __init__(self, itemName, shopVID, count, price, slot, won = 0):
+		def __init__(self, itemName, shopVID, count, price, slot, won = 0, posX = 0, posY = 0):
 			self.name = itemName
 			self.shop = shopVID
 			self.count = count
-			self.price = (price + won*100000000)/self.count
+			self.yang = price                                 # raw yang the shop set for this slot
+			self.won = won                                    # raw won (cheque) the shop set for this slot
+			self.price = (price + won*100000000)/self.count   # per-unit total yang, used only for sorting
 			self.slot = slot
+			self.shop_x = posX
+			self.shop_y = posY
 		def GetDisplay(self):
-			return " {:20}     {:10}    {:10}".format(self.name[:20],chr.GetNameByVID(self.shop)[:10], convertPrice(self.price))
+			return " {:20}     {:10}    {:10}".format(self.name[:20],chr.GetNameByVID(self.shop)[:10], convertPrice(self.yang,self.won))
 		def getStringFormat(self):
 			return "Slot: " + str(self.slot) + "  Name: " + str(self.name) + "  Price: " + str(self.price) + " yang  Count: " + str(self.count) + " Shop VID: " + str(self.shop)
 	
@@ -190,6 +207,7 @@ class SearchDialog(ui.ScriptWindow):
 		self.lNumItems = self.comp.TextLine(self.Board, '', 14, relativeEndY(120), self.comp.RGB(255, 255, 0))
 
 		self.PlayersVids = []
+		self.Items = []
 		self.State = 0
 		self.PlayerIndex = 0
 
@@ -204,7 +222,8 @@ class SearchDialog(ui.ScriptWindow):
 		self.numShopsSearched = 0
 		self.State = 1
 		self.PlayersVids = []
-		self.Items = []
+		# Do NOT reset self.Items here: we accumulate finds across areas so shops scanned
+		# earlier stay in the list after we move out of their instance range.
 		self.PlayerIndex = 0
 		self.ScanPlayers()
 		self.State = self.STATE_OPEN_SHOP
@@ -219,8 +238,20 @@ class SearchDialog(ui.ScriptWindow):
 		itemList = self.ListBoxItems.GetSelectedItem()
 		if itemList:
 			item = itemList.GetText()
-			x,y,z = chr.GetPixelPosition(item.shop)
-			chr.MoveToDestPosition(player.GetMainCharacterIndex(),x, y)
+			# Prefer the position captured at search time; fall back to a live lookup
+			# (owner may still be in sight) and bail out if neither yields a real
+			# position, so we never walk to the map origin (the old top-left bug).
+			x, y = getattr(item, 'shop_x', 0), getattr(item, 'shop_y', 0)
+			if abs(x) < 1.0 and abs(y) < 1.0:
+				x, y, z = chr.GetPixelPosition(item.shop)
+			if abs(x) < 1.0 and abs(y) < 1.0:
+				chat.AppendChat(3, "[SearchBot] Shop owner out of sight - re-run the search to refresh its position.")
+				return
+			# Route around walls with A* pathfinding (same pipeline EnergyBot uses);
+			# fall back to a straight-line click-move only if the map has no collision
+			# data / the target is unreachable (FindPath returns no path).
+			if Movement.GoToPositionAvoidingObjects(x, y) == Movement.NO_PATH_FOUND:
+				chr.MoveToDestPosition(player.GetMainCharacterIndex(), x, y)
 	
 	def OpenSelectedShop(self):
 		itemList = self.ListBoxItems.GetSelectedItem()
@@ -238,11 +269,11 @@ class SearchDialog(ui.ScriptWindow):
 
 
 	def UpdateItemList(self):
-		value = self.ItemEditBoxValue.GetText()
+		value = (self.ItemEditBoxValue.GetText() or "").strip().lower()
 		self.ListBoxItems.RemoveAllItems()
 		lst = []
 		for item in self.Items:
-			if value in item.name:
+			if value in item.name.lower():
 				lst.append(item)
 		lst.sort(key=lambda x: x.price)
 		for item in lst:
@@ -291,6 +322,13 @@ class SearchDialog(ui.ScriptWindow):
 	def ScanShop(self,vid):
 		self.numShopsSearched+=1
 		chr.SelectInstance(vid)
+		# Capture the shop owner's position now, while the shop is open and the instance
+		# is guaranteed loaded. Re-reading it later (owner out of sight) returns (0,0,0)
+		# and would send the character walking to the map origin (top-left).
+		shop_x, shop_y, shop_z = chr.GetPixelPosition(vid)
+		# Accumulate across areas: drop any earlier items for THIS shop so a re-scan
+		# refreshes them, while keeping items from shops scanned elsewhere.
+		self.Items = [it for it in self.Items if it.shop != vid]
 		for x in range(0,self.SLOT_COUNT*shop.GetTabCount()):
 			id = shop.GetItemID(x)
 			if id != 0:
@@ -301,7 +339,7 @@ class SearchDialog(ui.ScriptWindow):
 					skill_name = str(skill.GetSkillName(sk))
 					name = str(skill_name) + " " + name
 				count = shop.GetItemCount(x)
-				it = self.Item(name,vid,count,price,x,shop.GetItemCheque(x))
+				it = self.Item(name,vid,count,price,x,shop.GetItemCheque(x),shop_x,shop_y)
 				self.Items.append(it)
 		self.UpdateLabelText()
 				#chat.AppendChat(3,"Slot: " + str(x) + "  Name: " + str(name) + "  Price: " + str(price) + " yang  Count: " + str(count))
