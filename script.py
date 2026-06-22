@@ -61,7 +61,7 @@ for modulename, module in iter(sys.modules.items()):
     if HasArguments(module, ['O_APPEND']):os = module
     if HasArguments(module, ['WRAPPER_ASSIGNMENTS']):functools = module
 
-from OpenBot.Modules import FileManager, UIComponents, ShopSearcher, Settings, Shopcreator, KeyBot, Skillbot, ChannelSwitcher, EnergyBot
+from OpenBot.Modules import FileManager, UIComponents, ShopSearcher, Settings, Shopcreator, KeyBot, Skillbot, ChannelSwitcher, EnergyBot, StoneCompass
 from OpenBot.Modules.Actions import ActionBot
 import eXLib, Data
 
@@ -82,7 +82,7 @@ class OpenBotHackbarDialog(ui.ScriptWindow):
         if DEBUG:
             self.OpenBotBoard.SetSize(51, 500)
         else:
-            self.OpenBotBoard.SetSize(51, 305)
+            self.OpenBotBoard.SetSize(51, 340)
         self.OpenBotBoard.AddFlag("float")
         self.OpenBotBoard.AddFlag("movable")
         self.OpenBotBoard.Hide()
@@ -93,10 +93,11 @@ class OpenBotHackbarDialog(ui.ScriptWindow):
         self.SearchBotButton = self.comp.Button(self.OpenBotBoard, '', 'SearchBot', 10, 45, self.SearchBot, eXLib.PATH + 'OpenBot/Images/Hackbar/search_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/search_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/search_0.tga')
         self.ShopCreatorButton = self.comp.Button(self.OpenBotBoard, '', 'Shopbot', 8, 78, self.ShopCreator, eXLib.PATH + 'OpenBot/Images/Hackbar/shop_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/shop_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/shop_0.tga')
         self.SkillbotButton = self.comp.Button(self.OpenBotBoard, '', 'Skillbot', 8, 113, self.OnSkillbot, eXLib.PATH + 'OpenBot/Images/Hackbar/skill_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/skill_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/skill_0.tga')
-        self.ZoomButton = self.comp.Button(self.OpenBotBoard, '', 'Zoom-Hack', 10, 149, self.Zoom, eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga')
-        self.EnergyBotButton = self.comp.Button(self.OpenBotBoard, '', 'EnergyBot', 10, 183, self.OnEnergyBot, eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga')
-        self.ActionBotButton = self.comp.Button(self.OpenBotBoard, '', 'ActionBot', 8, 216, self.OnActionBot, eXLib.PATH + 'OpenBot/Images/Hackbar/action_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/action_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/action_0.tga')
-        self.CrashButton = self.comp.Button(self.OpenBotBoard, '', 'Exit', 10, 266, self.CloseRequest, eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga')
+        self.StoneCompassButton = self.comp.Button(self.OpenBotBoard, '', 'Stone Compass', 8, 147, self.OnStoneCompass, eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga')
+        self.ZoomButton = self.comp.Button(self.OpenBotBoard, '', 'Zoom-Hack', 10, 183, self.Zoom, eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga')
+        self.EnergyBotButton = self.comp.Button(self.OpenBotBoard, '', 'EnergyBot', 10, 216, self.OnEnergyBot, eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga')
+        self.ActionBotButton = self.comp.Button(self.OpenBotBoard, '', 'ActionBot', 8, 248, self.OnActionBot, eXLib.PATH + 'OpenBot/Images/Hackbar/action_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/action_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/action_0.tga')
+        self.CrashButton = self.comp.Button(self.OpenBotBoard, '', 'Exit', 10, 300, self.CloseRequest, eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga')
 
     def OpenHackbar(self):
         if self.Hackbar:
@@ -133,6 +134,9 @@ class OpenBotHackbarDialog(ui.ScriptWindow):
     
     def OnActionBot(self):
         self.action_bot.switch_state()
+
+    def OnStoneCompass(self):
+        StoneCompass.switch_state()
 
     def Close(self):
         app.Abort()
