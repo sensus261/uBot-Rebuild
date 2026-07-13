@@ -216,6 +216,24 @@ def GetCurrentPhase():
     global CURRENT_PHASE
     return CURRENT_PHASE
 
+def replayGamePhase():
+    """
+    Walker build: called by eXLib (App::__AppProcess) on every world re-entry (teleport / map change).
+    With packet hooks off the client's phase machinery never reaches uBot and the net.SetPhaseWindow
+    hook misses the game re-entry, so CURRENT_PHASE goes stale and the bots' per-frame Frame pump never
+    resumes. This refreshes the phase and re-fires the registered phase callbacks (which rebuild
+    per-map UI/state and re-Show the bot windows, re-registering their OnUpdate pump).
+    """
+    global CURRENT_PHASE
+    CURRENT_PHASE = 5  # OpenLib.PHASE_GAME
+    for cid in list(phaseCallbacks.keys()):
+        cb = phaseCallbacks.get(cid)
+        if callable(cb):
+            try:
+                cb(CURRENT_PHASE, GAME_WINDOW)
+            except:
+                pass
+
 def GetGameWindow():
     global GAME_WINDOW
     return GAME_WINDOW

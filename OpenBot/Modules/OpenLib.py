@@ -161,7 +161,7 @@ def Revive(in_city=False):
 	"""
 	Revive the main instance.
 	"""
-	# player.SetAttackKeyState(False)
+	player.SetAttackKeyState(False)
 	if not in_city:
 		net.SendCommandPacket(net.PLAYER_CMD_RESTART, 1)
 	else:
@@ -192,16 +192,67 @@ def ConvertPrice(price_str,item_num=1):
 
 	return (wons,rest_yang)
 
+# Some client skilldesc.txt files ship incomplete (missing warrior-5, shaman-111, all wolfman rows, ...),
+# so SKILL_INFORMATION[id] raises KeyError -> and when that fires inside the phase-change callback it
+# aborts the world load (stuck at loading screen). This static map of every class' 6 main skills (folder,
+# icon) is the fallback so GetSkillIconPath ALWAYS resolves and NEVER throws. id -> (skill folder, icon).
+SKILL_ICON_FALLBACK = {
+	1:("warrior","samyeon"),   2:("warrior","palbang"),    3:("warrior","jeongwi"),
+	4:("warrior","geomgyeong"),5:("warrior","tanhwan"),    6:("warrior","gihyeol"),
+	16:("warrior","gigongcham"),17:("warrior","gyeoksan"), 18:("warrior","daejin"),
+	19:("warrior","cheongeun"),20:("warrior","geompung"),  21:("warrior","noegeom"),
+	31:("assassin","amseup"),  32:("assassin","gungsin"),  33:("assassin","charyun"),
+	34:("assassin","eunhyeong"),35:("assassin","sangong"), 36:("assassin","seomjeon"),
+	46:("assassin","yeonsa"),  47:("assassin","gwangyeok"),48:("assassin","hwajo"),
+	49:("assassin","gyeonggong"),50:("assassin","gigung"), 51:("assassin","seomgwang"),
+	61:("sura","swaeryeong"),  62:("sura","yonggwon"),     63:("sura","gwigeom"),
+	64:("sura","gongpo"),      65:("sura","jumagap"),      66:("sura","pabeop"),
+	76:("sura","maryeong"),    77:("sura","hwayeom"),      78:("sura","muyeong"),
+	79:("sura","heuksin"),     80:("sura","tusok"),        81:("sura","geomhwan"),
+	91:("shaman","bipabu"),    92:("shaman","yongpa"),     93:("shaman","paeryong"),
+	94:("shaman","hosin"),     95:("shaman","boho"),       96:("shaman","gicheon"),
+	106:("shaman","noejeon"),  107:("shaman","byeorak"),   108:("shaman","pokroe"),
+	109:("shaman","jeongeop"), 110:("shaman","kwaesok"),   111:("shaman","jeungryeok"),
+	170:("wolfman","split_slash"),  171:("wolfman","wind_death"),    172:("wolfman","reef_attack"),
+	173:("wolfman","wreckage"),     174:("wolfman","red_possession"),175:("wolfman","blue_possession"),
+}
+
+# Skill classification from skilldesc flags (col10), extracted from the GF reference skilldesc so it
+# does NOT depend on the client's (often incomplete) skilldesc. Covers all 8 class trees + lycan mains.
+#   SKILL_BUFFS       = STANDING_SKILL & NOT ATTACK_SKILL -> a real self-buff (recast on duration).
+#   SKILL_ATTACKS     = ATTACK_SKILL -> offensive (some also carry STANDING_SKILL, which is why
+#                       skill.IsStandingSkill alone WRONGLY flags them as buffs -> must check this first).
+#   SKILL_NO_TARGET_ATTACK = ATTACK_SKILL & NOT NEED_TARGET -> AoE/self-centered, fires with no focus
+#                       (e.g. sura Dragon Swirl 62, lycan Wolf's Breath 171, warrior 2/17/18/20/21).
+SKILL_BUFFS = frozenset([3,4,19,34,49,63,64,65,79,94,95,96,109,110,111,174,175])
+SKILL_ATTACKS = frozenset([1,2,5,6,16,17,18,20,21,31,32,33,35,36,46,47,48,50,51,
+                           61,62,66,76,77,78,80,81,91,92,93,106,107,108,170,171,172,173])
+SKILL_NO_TARGET_ATTACK = frozenset([2,17,18,20,21,33,51,62,77,78,171])
+#   SKILL_TOGGLE = STANDING_SKILL|TOGGLE -> an on/off aura; RECASTING IT TURNS IT OFF. Must be cast ONCE
+#                  to enable and NEVER auto-recast on a timer (that was the "only 1 of N buffs stays up").
+SKILL_TOGGLE = frozenset([63,78,79,174])
+
 def GetSkillIconPath(id,grade=3):
 	"""
-	Returns the icon path of a skill image.
+	Returns the icon path of a skill image, or None if the skill is unknown.
+	NEVER raises -- a missing skilldesc row must not brick a phase-change callback (world-load hang).
 	Args:
 		id(int) : Id of the skill.
 		grade(int) : Grade of the skill 1-3.
 	"""
-	skill = SKILL_INFORMATION[id]
-	skill_class = skill["class"]
-	skill_icon_name = skill["icon"]
+	skill_class = None
+	skill_icon_name = None
+	try:
+		skill = SKILL_INFORMATION[id]
+		skill_class = skill["class"]
+		skill_icon_name = skill["icon"]
+	except (KeyError, TypeError):
+		pass
+	if not skill_class or not skill_icon_name:
+		fb = SKILL_ICON_FALLBACK.get(id)
+		if not fb:
+			return None
+		skill_class, skill_icon_name = fb
 	return "d:/ymir work/ui/skill/" + skill_class + "/" + skill_icon_name + "_0"+str(grade)+".sub"
 
 def GetClassSkillIDs(_class):
@@ -244,10 +295,17 @@ def GetClass():
 	race = Data.mainRace
 	group = Data.mainSkillGroup
 
+	# Races 0-7 are the 4 base classes x2 genders (CE-confirmed: 6 = female Sura). Lycan/wolfman is
+	# race >= 8 and has a single skill tree that does NOT fit the (2*race)+group scheme -- race%4 would
+	# collapse it onto the warrior (race 0) slot, showing warrior skills. Route it to its own skillset
+	# once its skills unlock (group != 0); before that it's NONE like any classless char.
+	if race >= 8:
+		return SKILL_SET_1_LYCAN if group != 0 else SKILL_SET_NONE
+
 	race = race % 4
 	if(group!= 0):
 		return (2*race)+group
-	
+
 	return 0
 		
 #Skip python select answers
@@ -682,10 +740,10 @@ def AttackTarget(vid):
 	if player.GetCharacterDistance(vid) < ATTACK_RANGE:
 		Movement.StopMovement()
 		RotateMainCharacter(mob_x,mob_y)
-		# player.SetAttackKeyState(True)
+		# player.SetAttackKeyState(True)  # DEAD on GF client: raises/no-op, never swings (see AutoHunting notes)
 		return ATTACKING_TARGET
 	else:
-		# player.SetAttackKeyState(False)
+		# player.SetAttackKeyState(False)  # DEAD on GF client (raises): would abort the walk / break Revive
 		Movement.GoToPositionAvoidingObjects(mob_x,mob_y)
 		return MOVING_TO_TARGET
 		
@@ -1015,6 +1073,13 @@ class EterPackOperator(object):
 FileManager.LoadDictFile(FileManager.CONFIG_BOSSES_ID, BOSS_IDS, int)
 FileManager.LoadDictFile(FileManager.CONFIG_ORES_ID, ORES_IDS, int)
 # Hooks._debugHookFunctionArgs(event.SelectAnswer)  # debug-only: logged every dialog answer to debug.txt - disabled for release
-function_handler = TimeFunctionHandler()
-function_handler.Show()
+# reload-safe (for the /rah in-game hot-reload): first load -> build+show the timer window; on RELOAD it
+# already exists in this module dict, so REUSE it (rebind its class for the new OnUpdate code) instead of
+# spawning a duplicate ScriptWindow that would keep firing. Keeps its pending function_list.
+try:
+    function_handler
+    function_handler.__class__ = TimeFunctionHandler
+except NameError:
+    function_handler = TimeFunctionHandler()
+    function_handler.Show()
 import Movement
