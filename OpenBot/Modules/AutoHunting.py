@@ -1564,7 +1564,7 @@ class AutoHunting(BotBase):
         if now < self._castRestartAt:
             return   # don't drive movement while a skill cast is finishing
         try:
-            p = chr.GetPixelPosition()
+            p = player.GetMainCharacterPosition()
             px, py = float(p[0]), float(p[1])
         except:
             return
@@ -1613,7 +1613,7 @@ class AutoHunting(BotBase):
         if (now - self._stillSince) < STUCK_SECS:
             return   # the engine is still moving us -> don't interfere
         try:
-            tx, ty, tz = chr.GetPixelPosition(tvid)
+            tx, ty, tz = eXLib.GetPixelPosition(tvid)
         except:
             return
         if self._anchor is not None:
@@ -1701,15 +1701,15 @@ class AutoHunting(BotBase):
             pass
 
     def _pos(self, vid):
-        # Position of an instance as (x, y), or None. The NO-ARG chr.GetPixelPosition() is broken on this
+        # Position of an instance as (x, y), or None. The NO-ARG player.GetMainCharacterPosition() is broken on this
         # client (raises even after SelectInstance -> the custom-engine no-op). The working forms (proven
         # in Settings.py, and same coord space there): player.GetMainCharacterPosition() for our OWN char,
-        # chr.GetPixelPosition(vid) for any other instance.
+        # eXLib.GetPixelPosition(vid) for any other instance.
         try:
             if vid and vid == player.GetMainCharacterIndex():
                 p = player.GetMainCharacterPosition()
             else:
-                p = chr.GetPixelPosition(vid)
+                p = eXLib.GetPixelPosition(vid)
             return (float(p[0]), float(p[1]))
         except:
             return None
@@ -2004,7 +2004,7 @@ class AutoHunting(BotBase):
                 if 0 <= d < nearD:
                     nearD, nearV = d, vid
                 if ax is not None:
-                    tx, ty, tz = chr.GetPixelPosition(vid)   # (vid) form works; no-arg raises
+                    tx, ty, tz = eXLib.GetPixelPosition(vid)   # (vid) form works; no-arg raises
                     if (tx - ax) ** 2 + (ty - ay) ** 2 > zr2:
                         continue   # outside the anchored zone -> ignore (anti-drift)
             except:

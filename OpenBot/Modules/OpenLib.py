@@ -76,7 +76,8 @@ from datetime import datetime
 #Range of player attack
 ATTACK_RANGE = 270
 
-#Types
+#Types -- verified live on 26.1.11 (entity dump): metin(race 8003)=2, ore(race 20047)=1, monster=0, player=6.
+# The instance-type enum did NOT change across the update; these are correct.
 NONE_TYPE = -99
 OBJECT_TYPE = 1
 METIN_TYPE = 2
@@ -551,7 +552,7 @@ def RotateMainCharacter(x,y):
 
 def RotateMainCharacterByVid(vid):
 	chr.SelectInstance(vid)
-	x, y, z = chr.GetPixelPosition()
+	x, y, z = player.GetMainCharacterPosition()
 	RotateMainCharacter(x, y)
 
 def GetCurrentPhase():
@@ -589,7 +590,7 @@ def getAllStatusOfMainActor():
 		dict
 
 	"""
-	x, y, z = chr.GetPixelPosition(Data.mainVID)
+	x, y, z = eXLib.GetPixelPosition(Data.mainVID)
 	character_status = {
 		'Position': [x, y],
 		'CurrentMap': background.GetCurrentMapName(),
@@ -632,7 +633,7 @@ def GetNearestMonsterVid():
 		
 		_type = chr.GetInstanceType(vid)
 		if MONSTER_TYPE == _type or METIN_TYPE == _type:
-			monst_pos = chr.GetPixelPosition(vid)
+			monst_pos = eXLib.GetPixelPosition(vid)
 			this_dist = dist(my_pos[0],my_pos[1],monst_pos[0],monst_pos[1])
 
 			if this_dist < _dist:
@@ -642,8 +643,8 @@ def GetNearestMonsterVid():
 	return closest_vid
 
 def isPathToVID(vid_target):
-	x, y, z = chr.GetPixelPosition(vid_target)
-	my_x, my_y, my_z = chr.GetPixelPosition(Data.mainVID)
+	x, y, z = eXLib.GetPixelPosition(vid_target)
+	my_x, my_y, my_z = eXLib.GetPixelPosition(Data.mainVID)
 	if eXLib.FindPath(my_x, my_y, x, y):
 		return True
 	return False
@@ -662,7 +663,7 @@ def isPlayerCloseToInstance(vid_target, max_dist=150):
 		return False
 
 	player_x, player_y, player_z = player.GetMainCharacterPosition()
-	target_x, target_y, target_z = chr.GetPixelPosition(vid_target)
+	target_x, target_y, target_z = eXLib.GetPixelPosition(vid_target)
 	distance = dist(target_x, target_y, player_x, player_y)
 
 	if distance < max_dist:
@@ -707,7 +708,7 @@ def getClosestInstance(_type,is_unblocked=True):
 			continue
 
 		if is_unblocked:
-			mob_x,mob_y,mob_z = chr.GetPixelPosition(vid)
+			mob_x,mob_y,mob_z = eXLib.GetPixelPosition(vid)
 			if eXLib.IsPositionBlocked(mob_x,mob_y):
 				continue
 
@@ -736,7 +737,7 @@ def AttackTarget(vid):
 	"""
 	if eXLib.IsDead(vid):
 		return TARGET_IS_DEAD
-	mob_x,mob_y,mob_z = chr.GetPixelPosition(vid)
+	mob_x,mob_y,mob_z = eXLib.GetPixelPosition(vid)
 	if player.GetCharacterDistance(vid) < ATTACK_RANGE:
 		Movement.StopMovement()
 		RotateMainCharacter(mob_x,mob_y)
@@ -942,6 +943,91 @@ def SetTimerFunction(time,function):
 	function_handler.RegisterOnEventExit(time,function)
 
 
+# ===== MANUAL-INTERVENTION-STOPS-MOVEMENT (reload-safe; driven by TimeFunctionHandler.OnUpdate) =====
+# While the shared Movement singleton is actively pathing a bot (Movement.state == STATE_MOVING), watch
+# the player's motion. If the character moves AGAINST the direction the bot last commanded (toward the
+# next path point) for MANUAL_STOP_TICKS consecutive ~0.18s ticks, treat it as the user grabbing control
+# -> stop pathing (StopMovement + cancel the in-flight move) and stop the bot drivers that would re-issue
+# moves (ShopSearcher sweep, EnergyBot). Heuristic (uBot has no real manual-move signal): dot(actual,
+# commanded) < 0. Debounce + a min-move gate avoid false stops from rubber-banding / standing still;
+# pathfinding corners stay dot>0 because the bot commands toward the NEXT path point the char heads to.
+_ms_last = None
+_ms_away = 0
+_ms_t = 0.0
+MANUAL_STOP_MOVE_EPS = 30.0
+MANUAL_STOP_TICKS = 2
+MANUAL_STOP_DEBUG = False   # release: keep the 'manual control detected' chat line OFF
+
+def _manualStopCheck():
+	global _ms_last, _ms_away, _ms_t
+	import Movement as _MV
+	mv = buildin.getattr(_MV, 'Movement', None)
+	if mv is None or buildin.getattr(mv, 'state', 0) != _MV.STATE_MOVING:
+		_ms_last = None; _ms_away = 0
+		return
+	_now = GetTime()
+	_dt = _now - _ms_t
+	if 0.0 <= _dt < 0.18:
+		return
+	_ms_t = _now
+	path = buildin.getattr(mv, 'path', None)
+	if not path:
+		_ms_last = None; _ms_away = 0
+		return
+	try:
+		px, py, pz = player.GetMainCharacterPosition()
+	except:
+		return
+	tx, ty = path[0]
+	if _ms_last is None:
+		_ms_last = (px, py); _ms_away = 0
+		return
+	lx, ly = _ms_last
+	_ms_last = (px, py)
+	mvx = px - lx; mvy = py - ly
+	moved = (mvx*mvx + mvy*mvy) ** 0.5
+	if moved < MANUAL_STOP_MOVE_EPS:
+		_ms_away = 0
+		return
+	cvx = tx - lx; cvy = ty - ly
+	dot = mvx*cvx + mvy*cvy
+	if dot < 0.0:
+		_ms_away = _ms_away + 1
+	else:
+		_ms_away = 0
+	if _ms_away >= MANUAL_STOP_TICKS:
+		_ms_away = 0
+		_manualStopTrigger()
+
+def _manualStopTrigger():
+	try:
+		import Movement as _MV
+		_MV.StopMovement()
+		try:
+			px, py, pz = player.GetMainCharacterPosition()
+			chr.MoveToDestPosition(player.GetMainCharacterIndex(), int(px), int(py))
+		except: pass
+	except: pass
+	try:
+		import ShopSearcher as _SS
+		sd = buildin.getattr(_SS, 'searchDialog', None) or buildin.getattr(_SS, 'instance', None)
+		if sd is not None and buildin.getattr(sd, 'sweeping', False):
+			sd.StopSweep()
+	except: pass
+	try:
+		import EnergyBot as _EB
+		eb = buildin.getattr(_EB, 'instance', None)
+		if eb is not None and buildin.hasattr(eb, '_stopBot'):
+			_st = buildin.getattr(_EB, 'S_STOP', None)
+			if _st is None or buildin.getattr(eb, 'state', None) != _st:
+				eb._stopBot()
+	except: pass
+	if MANUAL_STOP_DEBUG:
+		try:
+			import chat as _c
+			_c.AppendChat(3, '[uBot] manual control detected -> pathing stopped')
+		except: pass
+
 class TimeFunctionHandler(ui.ScriptWindow):
 
 	def __init__(self):
@@ -953,6 +1039,8 @@ class TimeFunctionHandler(ui.ScriptWindow):
 		self.function_list.append({"time":GetTime()+time,"function":function})
 
 	def OnUpdate(self):
+		try: _manualStopCheck()
+		except: pass
 		curTime = GetTime()
 		to_del = []
 		for i,func in enumerate(self.function_list):

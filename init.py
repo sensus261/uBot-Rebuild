@@ -159,7 +159,6 @@ else:
 
         Hackbar = 0
         comp = UIComponents.Component()
-        action_bot = ActionBot.instance
         energy_bot = EnergyBot.instance
 
         def __init__(self):
@@ -182,7 +181,6 @@ else:
             self.StoneCompassButton = self.comp.Button(self.OpenBotBoard, '', 'Stone Compass', 8, 147, self.OnStoneCompass, eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga')
             self.ZoomButton = self.comp.Button(self.OpenBotBoard, '', 'Zoom-Hack', 10, 183, self.Zoom, eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga')
             self.EnergyBotButton = self.comp.Button(self.OpenBotBoard, '', 'EnergyBot', 10, 216, self.OnEnergyBot, eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga')
-            self.ActionBotButton = self.comp.Button(self.OpenBotBoard, '', 'ActionBot', 8, 248, self.OnActionBot, eXLib.PATH + 'OpenBot/Images/Hackbar/action_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/action_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/action_0.tga')
             self.CrashButton = self.comp.Button(self.OpenBotBoard, '', 'Exit', 10, 300, self.CloseRequest, eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga')
 
         def OpenHackbar(self):
@@ -219,9 +217,6 @@ else:
 
         def OnEnergyBot(self):
             self.energy_bot.switch_state()
-
-        def OnActionBot(self):
-            self.action_bot.switch_state()
 
         def OnStoneCompass(self):
             StoneCompass.switch_state()
@@ -425,7 +420,7 @@ else:
         out.append("")
         _p1write(out)
         try:
-            chat.AppendChat(3, "[P1] map=%s instVids=%s mainVID=%s -> Phase1Diag.txt" % (str(mapName), str(cnt), str(mainVID)))
+            if PHASE1_DEBUG: chat.AppendChat(3, "[P1] map=%s instVids=%s mainVID=%s -> Phase1Diag.txt" % (str(mapName), str(cnt), str(mainVID)))
         except:
             pass
 
@@ -528,7 +523,11 @@ else:
     # same modules AND rebuilds the AutoHunting window in place (tears down + re-runs BuildWindow), so new
     # slot positions/sizes appear without a client/window restart. Plain "/rah" leaves the built widgets as-is.
     # The hook lives in script.py (run once, never reloaded) so it survives every /rah.
-    _RAH_RELOAD_LIST = ['OpenBot.Modules.OpenLib', 'OpenBot.Modules.AutoHunting']  # deps first, AutoHunting last
+    # deps first. The main hot-reloaded features: OpenLib (shared), ShopSearcher (trading glass) + EnergyBot,
+    # then AutoHunting. All are reload-safe (class-rebind singletons) so /rah swaps their LOGIC in place.
+    _RAH_RELOAD_LIST = ['OpenBot.Modules.OpenLib', 'OpenBot.Modules.ShopSearcher',
+                        'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.AutoHunting',
+                        'OpenBot.Modules.StoneCompass']
 
     def _rahReload():
         import sys as _sys
@@ -564,17 +563,23 @@ else:
             _info = buildin.getattr(_chat, 'CHAT_TYPE_INFO', 3)
         except:
             _chat = None; _info = 3
-        try:
-            _m = _sys.modules.get('OpenBot.Modules.AutoHunting')
-            _inst = buildin.getattr(_m, 'instance', None) if _m is not None else None
-            if _inst is not None:
-                _inst._rebuildWindow()
-            elif _chat:
-                _chat.AppendChat(_info, '[uBot] /rah-ui: no AutoHunting instance to rebuild')
-        except Exception as _e:
-            if _chat:
-                try: _chat.AppendChat(_info, '[uBot] /rah-ui rebuild ERR: %s' % _e)
-                except: pass
+        # rebuild every reloaded feature window that supports it (AutoHunting + EnergyBot + ShopSearcher).
+        # Each is independent + guarded; each module exposes `instance` (ShopSearcher aliases searchDialog).
+        _done = []
+        for _modname in ('OpenBot.Modules.AutoHunting', 'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.ShopSearcher'):
+            try:
+                _m = _sys.modules.get(_modname)
+                _inst = buildin.getattr(_m, 'instance', None) if _m is not None else None
+                if _inst is not None and buildin.hasattr(_inst, '_rebuildWindow'):
+                    _inst._rebuildWindow()
+                    _done.append(_modname.split('.')[-1])
+            except Exception as _e:
+                if _chat:
+                    try: _chat.AppendChat(_info, '[uBot] /rah-ui rebuild ERR %s: %s' % (_modname.split('.')[-1], _e))
+                    except: pass
+        if _chat:
+            try: _chat.AppendChat(_info, '[uBot] /rah-ui rebuilt: ' + (', '.join(_done) if _done else '(none)'))
+            except: pass
 
     try:
         import net as _rah_net

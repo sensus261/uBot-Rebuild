@@ -352,7 +352,7 @@ def MineOre(args):
     if not can_mine:
         pickaxe_slot = OpenLib.GetItemByID(29101)
         if pickaxe_slot > -1:
-            chat.AppendChat(3, 'pickaxe slot '+str(pickaxe_slot))
+            pass  # debug removed: 'pickaxe slot '+str(pickaxe_slot)
             net.SendItemUsePacket(pickaxe_slot)   
         else:
             can_mine = False
@@ -416,7 +416,7 @@ def LookForBlacksmithInDeamonTower(args):
                     else:
                         answer = [0, 254, 2]
                     
-                chat.AppendChat(3, answer)
+                pass  # debug removed: raw NPC answer dump
                 if answer:
                     action_dict = {
                         'function_args': [_id, (x, y), answer, 'metin2_map_deviltower1'],

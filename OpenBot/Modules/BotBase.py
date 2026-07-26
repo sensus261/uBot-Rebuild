@@ -169,7 +169,12 @@ class BotBase(ui.ScriptWindow):
 
 		if self.waitIsPlayerDead:
 			last_time_dead, time_wait = Settings.GetLastTimeDead()
-			if(last_time_dead+time_wait>OpenLib.GetTime()):
+			# clock-reset-safe: app.GetTime() jumps BACKWARD on a world reload (teleport/channel/char switch),
+			# so a stale pre-reload last_time_dead would keep (last_time_dead+time_wait > now) true forever and
+			# pause the bot permanently as if the player just died. Compare elapsed instead and treat a negative
+			# delta (clock reset) as "not recently dead". See metin2-apptime-clock-reset-reload memory.
+			_deadDt = OpenLib.GetTime() - last_time_dead
+			if(0 <= _deadDt < time_wait):
 				if(self.CanPause() and not self.isPaused):
 					self.isPaused = True
 					self.Pause()

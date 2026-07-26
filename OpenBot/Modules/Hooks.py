@@ -92,6 +92,28 @@ CURRENT_PHASE = 5
 phaseCallbacks = {}
 GAME_WINDOW = 0
 
+# ---- PHASE-WINDOW PIN (world-reload UAF fix) ----------------------------------------------------
+# Root cause (from exlib_crash.txt): on a teleport the client frees the phase/game-window python
+# object, but its C++ singleton keeps the dangling pointer and every frame calls
+# getattr(window, "BINARY_CheckGameButton") on it -> 0xC0000005 in python27 getattr. A fresh window
+# object is created (and freed) each reload. We hold a permanent reference to every window that flows
+# through the SetPhaseWindow / SetGameWindow hooks so it can never reach refcount 0 -> the client's
+# dangling-pointer getattr always lands on a live object. Windows are few; the retained-set is tiny.
+_pinnedWindows = []
+_pinnedWindowIds = set()
+def _pinWindow(obj):
+    # NO-OP as of the 26.1.11 crash fix. This used to permanently retain every game/phase window that
+    # flowed through SetGameWindow/SetPhaseWindow so the client could never getattr a freed one. But
+    # "permanent" meant every recreated game window (a fresh one per teleport) leaked forever, and a
+    # lingering old game window keeps the keyboard focus -> I/V/C stop toggling inventory/character
+    # after a teleport (the mouse buttons still work because they hit-test by screen position, not
+    # focus). The game-window UAF is now owned at the C++ level by App.cpp pinGameWindow (holds only
+    # the CURRENT window, releases the old on change) plus the VEH getattr recovery, so this Python
+    # retention is both redundant and the direct cause of the key-focus regression. Left as a no-op so
+    # the call sites in phaseIntercept / GameWindowIntercept stay untouched.
+    return
+# -------------------------------------------------------------------------------------------------
+
 class Hook():
     """
     Hook class that allows to replace functions in modules.
@@ -160,6 +182,7 @@ def phaseIntercept(*args, **kwargs):
     global CURRENT_PHASE
     if len(args) > 1 and args[1] != 0:
         CURRENT_PHASE = args[0]
+        _pinWindow(args[1])   # keep the phase-window object alive -> client can't getattr a freed one
     OpenLog.DebugPrint("PHASE: " + str(CURRENT_PHASE))
     for callback_id in phaseCallbacks:
         callback = phaseCallbacks[callback_id]
@@ -191,10 +214,18 @@ def GameWindowIntercept(*args, **kwargs):
     import Hooks, Data
     if args[0] == 0:
         return
+    # PERSISTENT capture. This hook used to self-unhook after the first game window (via uiShortcut), so
+    # Data.GameWindow went STALE on every teleport-recreate. It now stays hooked and refreshes the LIVE
+    # window each call. It must call the ORIGINAL via CallOriginalFunction -- NOT player.SetGameWindow,
+    # which now IS this hook and would infinite-recurse (the old code got away with player.SetGameWindow
+    # only because uiShortcut had already unhooked first). uiShortcut/aquireStream is still created once.
     Data.GameWindow = args[0]
-    Data.obj = Data.uiShortcut()
+    Data.CUR_GAME_WINDOW = args[0]
     Hooks.GAME_WINDOW = args[0]
-    player.SetGameWindow(*args, **kwargs)
+    if not getattr(Data, '_gw_shortcut_made', False):
+        Data.obj = Data.uiShortcut()
+        Data._gw_shortcut_made = True
+    Hooks.gameWindowHook.CallOriginalFunction(*args, **kwargs)
 
 def CheckAffectIntercept(*args, **kwargs):
     import Hooks

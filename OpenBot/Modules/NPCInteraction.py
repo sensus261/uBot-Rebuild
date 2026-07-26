@@ -296,7 +296,7 @@ class NPCInteractionDialog(ui.ScriptWindow):
 					return
 				slot = self.sellItems_list.pop(0)
 				net.SendShopSellPacketNew(slot,player.GetItemCount(slot),1)
-				chat.AppendChat(3,"[NPC-SHOPER] Sold item at slot " + str(slot))
+				pass  # release: was per-item auto-sell spam
 			return
 
 		if self.State == STATE_BUYING:

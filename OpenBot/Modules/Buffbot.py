@@ -280,7 +280,7 @@ class BuffDialog(ui.ScriptWindow):
 		self.UpdateBuff.SAFE_SetTimeOverEvent(self.Update)			
 
 	def FollowTarget_1(self):
-		x,y = chr.GetPixelPosition(TargetVid)[:2]
+		x,y = eXLib.GetPixelPosition(TargetVid)[:2]
 		chr.MoveToDestPosition(player.GetMainCharacterIndex(),int(x),int(y))
 		
 		self.UpdateFollow = OpenLib.WaitingDialog()

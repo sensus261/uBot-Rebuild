@@ -160,7 +160,7 @@ class Radar(BotBase):
                                           'd:/ymir work/ui/public/middle_button_03.sub')
 
     def addToFileListBoxEntities(self, vid, instance_type=OpenLib.NONE_TYPE):
-        x, y, z = chr.GetPixelPosition(vid)
+        x, y, z = eXLib.GetPixelPosition(vid)
         name = chr.GetNameByVID(vid)
         entity = {
             'type': instance_type,
@@ -249,7 +249,7 @@ class Radar(BotBase):
             if MAIN_CHAR_VID != vid:
                 if self.showDebugButton.isOn:
                     chr.SelectInstance(vid)
-                    chat.AppendChat(3, str(chr.GetInstanceType(vid)) + ' ' + str(chr.GetRace()) + ' ' + str(chr.GetName(vid)) + ' ' + str(chr.GetPixelPosition(vid))   + ' ' + str(vid) )
+                    chat.AppendChat(3, str(chr.GetInstanceType(vid)) + ' ' + str(chr.GetRace()) + ' ' + str(chr.GetName(vid)) + ' ' + str(eXLib.GetPixelPosition(vid))   + ' ' + str(vid) )
 
                 if self.IsThisEntityNew(vid):
                     if self.showOre:

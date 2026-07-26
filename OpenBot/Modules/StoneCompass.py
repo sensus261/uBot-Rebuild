@@ -12,6 +12,7 @@ for modulename, module in iter(sys.modules.items()):
     if HasArguments(module, ['GetNameByVID']): chr = module
     if HasArguments(module, ['ArrangeShowingChat']): chat = module
     if HasArguments(module, ['SetCameraMaxDistance']): app = module
+    if HasArguments(module, ['GetCurrentMapName']): background = module
     if HasArguments(module, ['ScriptWindow']): ui = module
 
 import eXLib, UIComponents, OpenLib, Movement
@@ -30,7 +31,7 @@ TYPE_LABELS = ['Metin', 'Ore', 'Boss']
 
 TICK_SECONDS = 3.0     # re-point the compass / refresh status this often
 PROXIMITY = 1000       # a live instance within this of a recorded spot == the same (static) object
-STATUS_DEBUG = False   # True -> append " i=<instances> t=<tick counter> me=<pos>" to the status line
+STATUS_DEBUG = False   # True -> append instance count / type histogram to the status line (dev diag)
 
 # A recorded target is flagged DEAD only when the player is within APPEAR_DIST of its coords and it
 # is NOT in the instance list (close enough it'd be visible if alive). Beyond that range the object
@@ -61,8 +62,12 @@ _BTN = ('d:/ymir work/ui/public/large_button_01.sub', 'd:/ymir work/ui/public/la
 
 # Every target the compass pointed at this session. Kept until the game closes.
 # Each entry: {name, x, y, kind, status('alive'|'dead'|'unknown')}.
-RECORDED = []
-RECORD_VERSION = [0]   # bumped whenever RECORDED or any status changes (drives the live refresh)
+try:                       # reload-safe (/rah): keep recorded targets + version across a logic reload
+    RECORDED
+    RECORD_VERSION
+except NameError:
+    RECORDED = []
+    RECORD_VERSION = [0]   # bumped whenever RECORDED or any status changes (drives the live refresh)
 
 def _recordTarget(vid, x, y, kind):
     try:
@@ -165,7 +170,11 @@ class TargetListDialog(ui.ScriptWindow):
         self.Board.Hide()
 
 
-listWindow = TargetListDialog()
+try:                       # reload-safe (/rah): rebind the LIVE list window to the new class (no dup window)
+    listWindow
+    listWindow.__class__ = TargetListDialog
+except NameError:
+    listWindow = TargetListDialog()
 
 
 class CompassDialog(ui.ScriptWindow):
@@ -261,7 +270,7 @@ class CompassDialog(ui.ScriptWindow):
                 if not chr.HasInstance(vid) or eXLib.IsDead(vid):
                     continue
                 t = chr.GetInstanceType(vid)
-                x, y, z = chr.GetPixelPosition(vid)
+                x, y, z = eXLib.GetPixelPosition(vid)
                 snap.append((vid, t, x, y))
             except:
                 continue
@@ -314,10 +323,23 @@ class CompassDialog(ui.ScriptWindow):
                 return
             self.lastTick = now
             self.ticks += 1
+
+            # WORLD-LOAD GC GUARD (this OnUpdate ticks every frame because the window is Show()n, so it
+            # runs THROUGH teleport / channel / character-switch reloads). During a reload the client tears
+            # the world down and rebuilds it; touching the instance list, CHURNING the record-list widgets
+            # (Refresh -> destroy/create ListBoxEx.Item objects), or spawning the StoneDetect effect THEN can
+            # corrupt the Python GC's object list -> freed-object crash on the next collect (the char-switch
+            # 'update_refs' crash). Do NONE of that until the map is back AND the player has a real position.
             try:
+                if not background.GetCurrentMapName():
+                    return
                 mVID = player.GetMainCharacterIndex()
-                mx, my, mz = chr.GetPixelPosition(mVID)
+                if not mVID:
+                    return
+                mx, my, mz = eXLib.GetPixelPosition(mVID)
             except:
+                return
+            if abs(mx) < 1.0 and abs(my) < 1.0:   # world still settling (position not restored) -> wait
                 return
 
             snap = self._snapshot()
@@ -331,19 +353,14 @@ class CompassDialog(ui.ScriptWindow):
             if not self.running:
                 return
 
-            # After a teleport/channel-switch the world reloads; if there's no valid player position
-            # yet, wait instead of spawning the effect at the map origin.
-            if abs(mx) < 1.0 and abs(my) < 1.0:
-                msg = 'waiting...'
-                if STATUS_DEBUG: msg += ' i=%d t=%d' % (len(snap), self.ticks)
-                self.lInfo.SetText(msg)
-                return
-
             kind = self._typeLabel()
             target = self._findNearest(kind, mx, my, snap)
             if target is None:
                 msg = '%s: none in range' % kind
-                if STATUS_DEBUG: msg += ' i=%d t=%d me=%d,%d' % (len(snap), self.ticks, mx, my)
+                if STATUS_DEBUG:
+                    _tc = {}
+                    for _e in snap: _tc[_e[1]] = _tc.get(_e[1], 0) + 1
+                    msg += ' i=%d types=%s' % (len(snap), _tc)   # dev diag (STATUS_DEBUG off for release)
                 self.lInfo.SetText(msg)
                 return
             vid, tx, ty = target
@@ -364,7 +381,11 @@ class CompassDialog(ui.ScriptWindow):
         self.Board.Hide()
 
 
-instance = CompassDialog()
+try:                       # reload-safe (/rah): rebind the LIVE compass window to the new class
+    instance
+    instance.__class__ = CompassDialog
+except NameError:
+    instance = CompassDialog()
 
 
 def switch_state():

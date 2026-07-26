@@ -444,7 +444,7 @@ class SettingsDialog(ui.ScriptWindow):
 		#if typ != OpenLib.MONSTER_TYPE and typ != OpenLib.METIN_TYPE:
 			#return
 		
-		mob_x, mob_y, mob_z = chr.GetPixelPosition(vid)
+		mob_x, mob_y, mob_z = eXLib.GetPixelPosition(vid)
 		is_remote = False
 		if OpenLib.dist(x,y,mob_x,mob_y) > OpenLib.ATTACK_MAX_DIST_NO_TELEPORT:
 			is_remote = True

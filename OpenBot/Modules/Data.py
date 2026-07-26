@@ -133,7 +133,9 @@ class uiShortcut(ui.ScriptWindow):
     comp = UIComponents.Component()
     def __init__(self):
         ui.ScriptWindow.__init__(self)
-        Hooks.gameWindowHook.UnhookFunction()
+        # NOTE: no longer unhooks gameWindowHook. GameWindowIntercept is now PERSISTENT (keeps
+        # Data.CUR_GAME_WINDOW fresh across teleport-recreates) and calls the original via
+        # CallOriginalFunction, so leaving the hook installed no longer causes recursion.
         OpenThreads.threadInstance.createThread(self.aquireStream,())
 
         """
