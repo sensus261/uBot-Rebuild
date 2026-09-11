@@ -131,7 +131,7 @@ class TargetListDialog(ui.ScriptWindow):
         self.listBox.SetViewItemCount(14)
 
         self.clearBtn = self.comp.Button(self.Board, 'Clear Selected', 'Remove the selected entry', 15, 300, self.OnClear, *_BTN)
-        self.goBtn = self.comp.Button(self.Board, 'Go to Object', 'Pathfind to the selected entry', 160, 300, self.OnGo, *_BTN)
+        self.goBtn = self.comp.Button(self.Board, 'Go', 'Pathfind to the selected entry', 160, 300, self.OnGo, *_BTN)
 
         self.Board.Hide()
 
@@ -209,7 +209,7 @@ class CompassDialog(ui.ScriptWindow):
         for i, lbl in enumerate(EFFECT_LABELS):
             self.effCombo.InsertItem(i, lbl)
 
-        self.lblType = self.comp.TextLine(self.Board, 'Target:', 20, 48, self.comp.RGB(255, 255, 255))
+        self.lblType = self.comp.TextLine(self.Board, 'Find:', 20, 48, self.comp.RGB(255, 255, 255))
         self.typeCombo = self.comp.ComboBoxFunc(self.Board, TYPE_LABELS[0], 66, 46, 110, self._onSelect)
         for i, lbl in enumerate(TYPE_LABELS):
             self.typeCombo.InsertItem(i, lbl)

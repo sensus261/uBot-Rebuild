@@ -327,7 +327,7 @@ class SearchDialog(ui.ScriptWindow):
 		# status label; and the Trading Glass button. (The old in-window item list / search / shop buttons are
 		# gone -- searching + buying live in the Trading Glass window now.)
 		self.Board = ui.BoardWithTitleBar()
-		self.Board.SetTitleName('SearchBot')
+		self.Board.SetTitleName('ShopSearch')
 		self.Board.SetCloseEvent(self.CloseWindow)
 		self.Board.SetSize(340, 152)
 		self.Board.SetCenterPosition()

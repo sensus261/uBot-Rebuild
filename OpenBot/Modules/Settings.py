@@ -132,7 +132,7 @@ class SettingsDialog(ui.ScriptWindow):
 		
 		self.comp = UIComponents.Component()
 
-		self.TabWidget = UIComponents.TabWindow(10,30,300-20,370-40,self.Board,['General', 'Channels'])
+		self.TabWidget = UIComponents.TabWindow(10,30,300-20,370-40,self.Board,['General', 'CH'])
 		self.generalTab = self.TabWidget.GetTab(0)
 		# self.pickupTab = self.TabWidget.GetTab(1)
 		# self.attackTab = self.TabWidget.GetTab(2)
@@ -192,6 +192,11 @@ class SettingsDialog(ui.ScriptWindow):
 
 		## CHANNELS
 		self.ChannelSwitcher = ChannelSwitcher.instance
+		# Release: disable the General-tab toggles (Auto Login / Auto Restart / WallHack / Red+Blue
+		# Potions) -> visible but non-toggleable; the walker build does not drive these.
+		for _gb in (self.loginBtn, self.reviveBtn, self.WallHackBtn, self.redPotButton, self.bluePotButton):
+			try: _gb.Disable()
+			except: pass
 		self.ChannelSwitcher.BuildWindow(self.channelsTab)
 		self.ChannelSwitcher.OnRefreshButton()
 		for id in sorted(self.ChannelSwitcher.channels):

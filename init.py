@@ -172,14 +172,14 @@ else:
             self.OpenBotBoard.AddFlag("movable")
             self.OpenBotBoard.Hide()
 
-            self.ShowHackbarButton = self.comp.Button(None, '', 'Show Hackbar', 10, 60, self.OpenHackbar, eXLib.PATH + 'OpenBot/Images/Shortcuts/show_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/show_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/show_0.tga')
-            self.HideHackbarButton = self.comp.HideButton(None, '', 'Hide Hackbar', 10, 60, self.OpenHackbar, eXLib.PATH + 'OpenBot/Images/Shortcuts/hide_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/hide_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/hide_0.tga')
+            self.ShowHackbarButton = self.comp.Button(None, '', 'Show uBot', 10, 60, self.OpenHackbar, eXLib.PATH + 'OpenBot/Images/Shortcuts/show_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/show_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/show_0.tga')
+            self.HideHackbarButton = self.comp.HideButton(None, '', 'Hide uBot', 10, 60, self.OpenHackbar, eXLib.PATH + 'OpenBot/Images/Shortcuts/hide_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/hide_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/hide_0.tga')
             self.SettingsButton = self.comp.Button(self.OpenBotBoard, '', 'Settings', 9, 10, self.Generel, eXLib.PATH + 'OpenBot/Images/Hackbar/sett_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/sett_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/sett_2.tga')
-            self.SearchBotButton = self.comp.Button(self.OpenBotBoard, '', 'SearchBot', 10, 45, self.SearchBot, eXLib.PATH + 'OpenBot/Images/Hackbar/search_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/search_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/search_0.tga')
+            self.SearchBotButton = self.comp.Button(self.OpenBotBoard, '', 'Shop Search', 10, 45, self.SearchBot, eXLib.PATH + 'OpenBot/Images/Hackbar/search_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/search_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/search_0.tga')
             self.ShopCreatorButton = self.comp.Button(self.OpenBotBoard, '', 'Shopbot', 8, 78, self.ShopCreator, eXLib.PATH + 'OpenBot/Images/Hackbar/shop_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/shop_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/shop_0.tga')
             self.SkillbotButton = self.comp.Button(self.OpenBotBoard, '', 'Auto-Hunt', 8, 113, self.OnSkillbot, eXLib.PATH + 'OpenBot/Images/Hackbar/auto_hunt_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/auto_hunt_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/auto_hunt_0.tga')
-            self.StoneCompassButton = self.comp.Button(self.OpenBotBoard, '', 'Stone Compass', 8, 147, self.OnStoneCompass, eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga')
-            self.ZoomButton = self.comp.Button(self.OpenBotBoard, '', 'Zoom-Hack', 10, 183, self.Zoom, eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga')
+            self.StoneCompassButton = self.comp.Button(self.OpenBotBoard, '', 'Compass', 8, 147, self.OnStoneCompass, eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga')
+            self.ZoomButton = self.comp.Button(self.OpenBotBoard, '', 'Zoom', 10, 183, self.Zoom, eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga')
             self.EnergyBotButton = self.comp.Button(self.OpenBotBoard, '', 'EnergyBot', 10, 216, self.OnEnergyBot, eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga')
             self.CrashButton = self.comp.Button(self.OpenBotBoard, '', 'Exit', 10, 300, self.CloseRequest, eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga')
 
@@ -230,10 +230,14 @@ else:
 
         def CloseRequest(self):
             self.QuestionDialog = uiCommon.QuestionDialog()
-            self.QuestionDialog.SetText("Do You want to quit Metin2 immediately?")
+            self.QuestionDialog.SetText("Do you want to quit Metin2 immediately?")
             self.QuestionDialog.SetAcceptEvent(ui.__mem_func__(self.Close))
             self.QuestionDialog.SetCancelEvent(ui.__mem_func__(self.CancelQuestionDialog))
             self.QuestionDialog.Open()
+            try: self.QuestionDialog.acceptButton.SetText("Yes")
+            except: pass
+            try: self.QuestionDialog.cancelButton.SetText("No")
+            except: pass
 
     try:
         app.Shop.Close()
@@ -527,7 +531,7 @@ else:
     # then AutoHunting. All are reload-safe (class-rebind singletons) so /rah swaps their LOGIC in place.
     _RAH_RELOAD_LIST = ['OpenBot.Modules.OpenLib', 'OpenBot.Modules.ShopSearcher',
                         'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.AutoHunting',
-                        'OpenBot.Modules.StoneCompass']
+                        'OpenBot.Modules.StoneCompass', 'OpenBot.Modules.Shopcreator']
 
     def _rahReload():
         import sys as _sys

@@ -2457,8 +2457,6 @@ class AutoHunting(BotBase):
         if wasShown:
             try: self.Board.Show()
             except: pass
-        try: _info("[Auto-Hunt] window rebuilt in place (build %s)" % AH_BUILD)
-        except: pass
 
 
 def switch_state():
