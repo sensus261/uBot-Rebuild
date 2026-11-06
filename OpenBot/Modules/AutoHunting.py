@@ -101,6 +101,13 @@ RANGE_MIN_U, RANGE_MAX_U, RANGE_NATIVE_U = 2000, 8000, 10000
 EFFECT_RECYCLE  = 2.0
 STUCK_SECS      = 2.0   # stationary this long while the focused target is out of range = blocked
 APPROACH_TICK   = 1.5   # throttle re-issuing uBot's collision-aware walk-to-target
+CLOSE_APPROACH_DIST = 1200   # target this close (e.g. just knocked back) -> use the fast tick below
+CLOSE_APPROACH_TICK = 0.25
+FAST_SWING = True        # swing at ~frame rate while in melee (like holding Space) -> full combo chain
+FAST_SWING_TICK = 0.05   # min gap between fast swings (raise toward 0.1 if it feels too spammy)
+SWING_TRACE = False  # debug: one [SW] chat line per swing (needs AH_DEBUG) -- spammy with FAST_SWING
+FACE_TICK = 0.5 # re-face the mob at most this often (0 = every swing, the old behaviour)
+HOLD_SWING_WHEN_PUSHED = True  # in melee but mob beyond ATTACK_RANGE: don't swing (NewAttack would step + break combo)
 USE_CUSTOM_ENGINE = True   # PURE CUSTOM: uBot picks nearest + walks to it + attacks via packet (proven
                            # damage) PLUS chr.PushOnceMotion for the visible swing animation. No native
                            # engine (it bricked when mixed with uBot movement control).
@@ -155,8 +162,8 @@ HELPER_ITEMS = [
 
 CONFIG_AH = eXLib.PATH + 'OpenBot/Saves/autohunt.bot'   # persisted Auto-Hunt settings (key=value lines)
 
-AH_DEBUG = False   # ON -> _dbg mirrors diagnostics to in-game chat. Off for release.
-AH_BUILD = "2026-07-12h"   # bump every edit -> logged on (re)load so we KNOW /rah actually loaded new code
+AH_DEBUG = True   # ON -> _dbg mirrors diagnostics to in-game chat. Off for release.
+AH_BUILD = "2026-07-12m-dbg"   # bump every edit -> logged on (re)load so we KNOW /rah actually loaded new code
 
 
 def _dbg(msg):
@@ -1378,6 +1385,38 @@ class AutoHunting(BotBase):
         except:
             return True
 
+    def OnUpdate(self):
+        BotBase.OnUpdate(self)   # the normal 0.2s-gated Frame -> _tick
+        if FAST_SWING:
+            try:
+                self._fastSwing()
+            except:
+                pass
+
+    def _fastSwing(self):
+        # Runs EVERY UI frame (not on the 0.2s bot tick). The client's combo (Sura sword: 4 hits) only
+        # advances when the attack input lands inside a short per-swing input window; holding Space
+        # sends it every frame so it always does. Calling NewAttack once per 0.2-0.4s only caught the
+        # window for hits 1-2. So while committed in melee we re-send it at ~frame rate, like a held key.
+        # Everything else (target pick, approach, leash, skills) stays on the slow tick.
+        if self.State == self.STATE_STOPPED or self.State == self.STATE_WATING:
+            return
+        if not (USE_CUSTOM_ENGINE and self.autoAttack and self._inMelee and self._huntTarget):
+            return
+        now = OpenLib.GetTime()
+        if now - getattr(self, '_lastSwing', 0.0) < FAST_SWING_TICK:
+            return
+        if now < getattr(self, '_reviveGraceUntil', 0.0) or now < self._castRestartAt:
+            return
+        tgt = self._validTarget(self._huntTarget, now)
+        if not tgt or not self._inGame() or self._isPlayerDead():
+            return
+        enterR = self._attackRange()[0]
+        if HOLD_SWING_WHEN_PUSHED and player.GetCharacterDistance(tgt) > enterR:
+            return
+        self._lastSwing = now
+        self._swingAt(tgt)
+
     def _tick(self):
         if not self._inGame():
             return
@@ -1868,6 +1907,23 @@ class AutoHunting(BotBase):
         # (attacking, no re-approach -> no oscillation/turning around the ring) until the mob flees past
         # COMBAT_MAX. NEW_Attack + the mob closing the gap lands the hits.
         enterR, stayR = self._attackRange()   # bow -> shoot from range; melee -> ATTACK_RANGE/COMBAT_MAX
+        # SMART RETARGET: our committed target is out of reach (knocked back / fled) but ANOTHER valid mob
+        # is already inside attack range (probably hitting us) -> switch to it instead of leaving melee to
+        # chase the pushed mob. Throttled: _acquireTarget scans every instance.
+        if dist > enterR and now - getattr(self, '_lastRetarget', 0.0) >= ACQUIRE_TICK:
+            self._lastRetarget = now
+            alt = self._acquireTarget(mainVID, now, maxDist=enterR, exclude=tgt)
+            if alt:
+                _dbg("[TGT] %s out of range (d=%.0f) -> %s already in range" % (tgt, dist, alt))
+                tgt = self._huntTarget = alt
+                self._approachTgt = 0
+                self._approachGoalPos = None
+                self._inMelee = False
+                try:
+                    player.SetTarget(tgt)
+                    dist = player.GetCharacterDistance(tgt)
+                except:
+                    return
         stalled = (now - self._stillSince) >= 0.4
         if not getattr(self, '_inMelee', False):
             if dist <= enterR or (dist <= stayR and stalled):
@@ -1888,6 +1944,14 @@ class AutoHunting(BotBase):
             return
         # IN MELEE -> attack via the client's animated attack on cadence.
         self._approachTgt = 0
+        # PUSHED-BACK HOLD: mob is inside the melee band (enterR..stayR) but out of real swing reach.
+        # NewAttack would make the client STEP toward it, breaking the swing/combo (2 hits, stop, 2 hits).
+        # Hold the swing instead; the mob normally walks back into reach. stayR still caps the wait.
+        if HOLD_SWING_WHEN_PUSHED and dist > enterR:
+            if dbg or now - getattr(self, '_lastHoldDbg', 0.0) > 1.0:
+                self._lastHoldDbg = now
+                _dbg("[HOLD] mob pushed d=%.0f > reach %d -> waiting, no swing" % (dist, enterR))
+            return
         if now - getattr(self, '_lastSwing', 0.0) >= SWING_TICK:
             self._lastSwing = now
             self._swingAt(tgt)
@@ -1908,10 +1972,13 @@ class AutoHunting(BotBase):
             return 0
         return vid
 
-    def _acquireTarget(self, mainVID, now):
+    def _acquireTarget(self, mainVID, now, maxDist=None, exclude=0):
         # NEAREST live monster inside the anchored zone (+ hunt range), skipping blacklisted ones.
+        # maxDist/exclude: used by the smart-retarget check (only mobs already within maxDist, not `exclude`).
         best_vid = 0
         best_dist = self.huntRange if self.autoRange else 1e9
+        if maxDist is not None:
+            best_dist = min(best_dist, maxDist + 1)
         passed = 0                      # candidates that cleared type+filter (reached the distance test)
         nearD, nearV = 1e18, 0          # nearest such candidate, to see if a range CAP is what's excluding
         ax = ay = None
@@ -1939,7 +2006,7 @@ class AutoHunting(BotBase):
         except:
             return 0
         for vid in vids:
-            if vid == mainVID or self._blacklist.get(vid, 0.0) > now:
+            if vid == mainVID or vid == exclude or self._blacklist.get(vid, 0.0) > now:
                 continue
             try:
                 if eXLib.IsDead(vid):
@@ -2012,7 +2079,7 @@ class AutoHunting(BotBase):
             if d < best_dist:
                 best_dist = d
                 best_vid = vid
-        if best_vid == 0 and AH_DEBUG and (now - getattr(self, '_lastAcqDbg', 0.0) > 2.0):
+        if best_vid == 0 and maxDist is None and AH_DEBUG and (now - getattr(self, '_lastAcqDbg', 0.0) > 2.0):
             self._lastAcqDbg = now
             _dbg("[ACQ] none inst=%d passedFilter=%d nearest=(d%.0f v%s) cap=%.0f foc=%d anch=%d" % (
                 len(vids), passed, nearD if nearD < 1e17 else -1, nearV, best_dist,
@@ -2022,7 +2089,13 @@ class AutoHunting(BotBase):
     def _approachTarget(self, tgt, px, py, now):
         # collision-aware walk toward a REACHABLE point near the target + unstuck/blacklist (same
         # strategy as the old _navAssist, but toward OUR chosen target instead of the engine's focus).
-        if now - self._lastApproach < APPROACH_TICK:
+        # KNOCKBACK FIX: the 1.5s throttle is for far chases (stops path spam). A mob that was just pushed
+        # back is CLOSE -> re-evaluate fast so we re-engage immediately instead of idling out the throttle.
+        try:
+            near = player.GetCharacterDistance(tgt) <= CLOSE_APPROACH_DIST
+        except:
+            near = False
+        if now - self._lastApproach < (CLOSE_APPROACH_TICK if near else APPROACH_TICK):
             return
         self._lastApproach = now
         tp = self._pos(tgt)
@@ -2080,16 +2153,36 @@ class AutoHunting(BotBase):
         # attack), which a field write does not trigger (set +0x34B44 to a valid VID -> still attacked
         # forward). So we face the mob ourselves right before the swing so the frontal-arc hit lands. Snap,
         # but reliable. (Truly native turning would need replicating that per-frame attack-state machine.)
-        tp = self._pos(tgt)
-        if tp is not None:
-            try:
-                OpenLib.RotateMainCharacter(tp[0], tp[1])
-            except:
-                pass
+        # Face the mob only when the target changed or every FACE_TICK s -- snapping the rotation before
+        # EVERY swing may reset the client's attack motion/combo (2 hits, stop, 2 hits).
+        now = OpenLib.GetTime()
+        if (tgt != getattr(self, '_faceTgt', 0)) or (now - getattr(self, '_lastFace', 0.0) >= FACE_TICK):
+            self._faceTgt = tgt
+            self._lastFace = now
+            tp = self._pos(tgt)
+            if tp is not None:
+                try:
+                    OpenLib.RotateMainCharacter(tp[0], tp[1])
+                except:
+                    pass
         try:
             eXLib.NewAttack()
         except:
             pass
+        if SWING_TRACE:
+            try:
+                p = player.GetMainCharacterPosition()
+                moved = 0.0
+                lp = getattr(self, '_trLastPos', None)
+                if lp is not None:
+                    moved = ((p[0] - lp[0]) ** 2 + (p[1] - lp[1]) ** 2) ** 0.5
+                self._trLastPos = (p[0], p[1])
+                _dbg("[SW] t=%.2f dt=%.2f d=%.0f moved=%.0f still=%.2f" % (
+                    now % 1000, now - getattr(self, '_trLastT', now), player.GetCharacterDistance(tgt),
+                    moved, now - self._stillSince))
+                self._trLastT = now
+            except:
+                pass
 
     def _weaponMode(self):
         # motion mode from the ACTUAL equipped weapon subtype -> the correct attack swing for ANY weapon

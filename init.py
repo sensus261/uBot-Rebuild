@@ -585,6 +585,37 @@ else:
             try: _chat.AppendChat(_info, '[uBot] /rah-ui rebuilt: ' + (', '.join(_done) if _done else '(none)'))
             except: pass
 
+    def _shopRaceDiag():
+        # /shoprace: dump race ids of all nearby instances so we can see which ones are shop stalls
+        # (OpenLib.MIN_RACE_SHOP..MAX_RACE_SHOP). Stand next to shops and run it.
+        try:
+            import chat as _chat, chr as _chr, eXLib as _ex
+            _info = buildin.getattr(_chat, 'CHAT_TYPE_INFO', 3)
+            import OpenBot.Modules.OpenLib as _ol
+            _lo, _hi = _ol.MIN_RACE_SHOP, _ol.MAX_RACE_SHOP
+            _by = {}
+            for _v in _ex.InstancesList:
+                try:
+                    if not _chr.HasInstance(_v):
+                        continue
+                    _chr.SelectInstance(_v)
+                    _r = _chr.GetRace(_v)
+                    try: _n = _chr.GetNameByVID(_v) or ''
+                    except: _n = ''
+                    _e = _by.setdefault(_r, [0, _n])
+                    _e[0] += 1
+                except:
+                    pass
+            _chat.AppendChat(_info, '[uBot] /shoprace: %d instances, shop range %d-%d' % (buildin.len(_ex.InstancesList), _lo, _hi))
+            for _r in buildin.sorted(_by.keys()):
+                _c, _n = _by[_r]
+                _chat.AppendChat(_info, '[uBot]  race %s x%d  e.g. "%s"%s' % (_r, _c, _n, '  <-- in shop range' if _lo <= _r <= _hi else ''))
+        except Exception as _e:
+            try:
+                import chat as _chat
+                _chat.AppendChat(3, '[uBot] /shoprace ERR: %s' % _e)
+            except: pass
+
     try:
         import net as _rah_net
         if not buildin.getattr(_rah_net, '_rah_hooked', False):
@@ -597,6 +628,9 @@ else:
                             _cmd = _a.strip().lower()
                             if _cmd in ('/rah-ui', '/rahui'):
                                 _rahReloadUI()
+                                return
+                            if _cmd == '/shoprace':
+                                _shopRaceDiag()
                                 return
                             if _cmd == '/rah':
                                 _rahReload()
