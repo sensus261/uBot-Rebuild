@@ -120,8 +120,10 @@ class ShopDialog(ui.ScriptWindow):
 
 	def _parseConf(self, raw):
 		# single price (yang). Migrate the old "won,yang" format written by a previous version.
+		# ReadConfig returns int 0 (not a str) when the key is missing
 		if raw is None or raw == "":
 			return "0"
+		raw = str(raw)
 		if "," in raw:
 			a, b = raw.split(",", 1)
 			won = int(_digits(a) or "0"); yang = int(_digits(b) or "0")

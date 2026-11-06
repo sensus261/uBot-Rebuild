@@ -75,6 +75,7 @@ BOARD_SIZE_X = 300
 BOARD_SIZE_Y = 450
 SB_LAYOUT_VER = 3   # SearchBot (release) window layout version -> switch_state rebuilds an older live window
 
+SCAN_TRACE = True   # TEMP diagnostics: per-checkpoint shop counts + first few open failures in chat
 DEBUG = False       # release: keep False. True surfaces developer diagnostics (tooltip/scan/save exceptions) in chat.
 
 def _dbg(msg):
@@ -312,6 +313,7 @@ class SearchDialog(ui.ScriptWindow):
 		self.swScanSub = 0
 		self.swScanTries = 0
 		self.swCpIdx = 0
+		self.swFailed = 0
 
 		self.BuildWindow()
 
@@ -448,6 +450,7 @@ class SearchDialog(ui.ScriptWindow):
 		self.swScanQueue = []
 		self.swScanSub = 0
 		self.swScanTries = 0
+		self.swFailed = 0
 		self.swCpIdx = 0
 		self.State = 0            # disable the old manual scanner
 		self.swState = SW_WALK
@@ -564,8 +567,8 @@ class SearchDialog(ui.ScriptWindow):
 
 	def UpdateSweepLabel(self):
 		try:
-			self.lSweep.SetText("Scan: Checkpoints %d/%d  Shops: %s  Items: %s" %
-				(self.swCpIdx, len(self.checkpoints), fmtThousands(len(self.swScannedVids)), fmtThousands(len(self.Items))))
+			self.lSweep.SetText("Scan: Checkpoints %d/%d  Shops: %s  Items: %s  Failed: %s" %
+				(self.swCpIdx, len(self.checkpoints), fmtThousands(len(self.swScannedVids)), fmtThousands(len(self.Items)), getattr(self, 'swFailed', 0)))
 		except:
 			pass
 
@@ -612,6 +615,9 @@ class SearchDialog(ui.ScriptWindow):
 			if self.swStable >= 2 and (_drainDt < 0 or _drainDt >= SWEEP_SETTLE):
 				self.swScanQueue = [v for v in vids if v not in self.swScannedVids]
 				self.swState = SW_SCAN
+				if SCAN_TRACE:
+					try: chat.AppendChat(3, "[Scan] cp %d: %d shops in range, %d to scan" % (self.swCpIdx, len(vids), len(self.swScanQueue)))
+					except: pass
 
 		elif self.swState == SW_SCAN:
 			if not self.swScanQueue:
@@ -634,6 +640,14 @@ class SearchDialog(ui.ScriptWindow):
 				else:
 					self.swScanTries += 1
 					if self.swScanTries > 5:              # never opened -> give up on this shop
+						self.swFailed += 1
+						if SCAN_TRACE and self.swFailed <= 5:
+							try:
+								_sx, _sy, _sz = eXLib.GetPixelPosition(vid)
+								_px, _py, _pz = player.GetMainCharacterPosition()
+								chat.AppendChat(3, "[Scan] shop vid %s race %s did NOT open (dist %d, open=%s)" % (vid, chr.GetRace(vid), ((_sx - _px) ** 2 + (_sy - _py) ** 2) ** 0.5, shop.IsOpen()))
+							except Exception as _e:
+								chat.AppendChat(3, "[Scan] shop vid %s did NOT open (diag err %s)" % (vid, _e))
 						self.swScanQueue.pop(0); self.swScanSub = 0
 			elif self.swScanSub == 2:                     # wait closed -> next shop
 				if not shop.IsOpen():

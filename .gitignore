@@ -1,2 +1,10 @@
 # compiled python bytecode
 *.pyc
+
+# Claude Code pipeline scratch, reports and local notes
+.claude/.tmp/
+PRE-COMMIT-REVIEW-REPORT.md
+PRE-MERGE-REVIEW-REPORT.md
+PRD-*.md
+ISSUE-*.md
+.claude/settings.local.json

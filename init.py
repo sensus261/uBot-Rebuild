@@ -147,7 +147,7 @@ else:
         if HasArguments(module, ['O_APPEND']):os = module
         if HasArguments(module, ['WRAPPER_ASSIGNMENTS']):functools = module
 
-    from OpenBot.Modules import FileManager, UIComponents, ShopSearcher, Settings, Shopcreator, KeyBot, Skillbot, ChannelSwitcher, EnergyBot, StoneCompass, AutoHunting
+    from OpenBot.Modules import FileManager, UIComponents, ShopSearcher, Settings, Shopcreator, KeyBot, Skillbot, ChannelSwitcher, EnergyBot, StoneCompass, AutoHunting, Pickup
     from OpenBot.Modules.Actions import ActionBot
     import eXLib, Data
 
@@ -181,6 +181,7 @@ else:
             self.StoneCompassButton = self.comp.Button(self.OpenBotBoard, '', 'Compass', 8, 147, self.OnStoneCompass, eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/compass_0.tga')
             self.ZoomButton = self.comp.Button(self.OpenBotBoard, '', 'Zoom', 10, 183, self.Zoom, eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/zoom_0.tga')
             self.EnergyBotButton = self.comp.Button(self.OpenBotBoard, '', 'EnergyBot', 10, 216, self.OnEnergyBot, eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/energy_0.tga')
+            self.PickupButton = self.comp.Button(self.OpenBotBoard, '', 'Pickup', 10, 258, self.OnPickup, eXLib.PATH + 'OpenBot/Images/Hackbar/pickup_0.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/pickup_1.tga', eXLib.PATH + 'OpenBot/Images/Hackbar/pickup_1.tga')
             self.CrashButton = self.comp.Button(self.OpenBotBoard, '', 'Exit', 10, 300, self.CloseRequest, eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_1.tga', eXLib.PATH + 'OpenBot/Images/Shortcuts/close_0.tga')
 
         def OpenHackbar(self):
@@ -203,6 +204,9 @@ else:
 
         def SearchBot(self):
             ShopSearcher.switch_state()
+
+        def OnPickup(self):
+            Pickup.switch_state()
 
         def ShopCreator(self):
             Shopcreator.switch_state()
@@ -531,7 +535,8 @@ else:
     # then AutoHunting. All are reload-safe (class-rebind singletons) so /rah swaps their LOGIC in place.
     _RAH_RELOAD_LIST = ['OpenBot.Modules.OpenLib', 'OpenBot.Modules.ShopSearcher',
                         'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.AutoHunting',
-                        'OpenBot.Modules.StoneCompass', 'OpenBot.Modules.Shopcreator']
+                        'OpenBot.Modules.StoneCompass', 'OpenBot.Modules.Shopcreator',
+                        'OpenBot.Modules.Pickup']
 
     def _rahReload():
         import sys as _sys
@@ -570,7 +575,7 @@ else:
         # rebuild every reloaded feature window that supports it (AutoHunting + EnergyBot + ShopSearcher).
         # Each is independent + guarded; each module exposes `instance` (ShopSearcher aliases searchDialog).
         _done = []
-        for _modname in ('OpenBot.Modules.AutoHunting', 'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.ShopSearcher'):
+        for _modname in ('OpenBot.Modules.AutoHunting', 'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.ShopSearcher', 'OpenBot.Modules.Pickup'):
             try:
                 _m = _sys.modules.get(_modname)
                 _inst = buildin.getattr(_m, 'instance', None) if _m is not None else None
@@ -585,6 +590,37 @@ else:
             try: _chat.AppendChat(_info, '[uBot] /rah-ui rebuilt: ' + (', '.join(_done) if _done else '(none)'))
             except: pass
 
+    def _shopRaceDiag():
+        # /shoprace: dump race ids of all nearby instances so we can see which ones are shop stalls
+        # (OpenLib.MIN_RACE_SHOP..MAX_RACE_SHOP). Stand next to shops and run it.
+        try:
+            import chat as _chat, chr as _chr, eXLib as _ex
+            _info = buildin.getattr(_chat, 'CHAT_TYPE_INFO', 3)
+            import OpenBot.Modules.OpenLib as _ol
+            _lo, _hi = _ol.MIN_RACE_SHOP, _ol.MAX_RACE_SHOP
+            _by = {}
+            for _v in _ex.InstancesList:
+                try:
+                    if not _chr.HasInstance(_v):
+                        continue
+                    _chr.SelectInstance(_v)
+                    _r = _chr.GetRace(_v)
+                    try: _n = _chr.GetNameByVID(_v) or ''
+                    except: _n = ''
+                    _e = _by.setdefault(_r, [0, _n])
+                    _e[0] += 1
+                except:
+                    pass
+            _chat.AppendChat(_info, '[uBot] /shoprace: %d instances, shop range %d-%d' % (buildin.len(_ex.InstancesList), _lo, _hi))
+            for _r in buildin.sorted(_by.keys()):
+                _c, _n = _by[_r]
+                _chat.AppendChat(_info, '[uBot]  race %s x%d  e.g. "%s"%s' % (_r, _c, _n, '  <-- in shop range' if _lo <= _r <= _hi else ''))
+        except Exception as _e:
+            try:
+                import chat as _chat
+                _chat.AppendChat(3, '[uBot] /shoprace ERR: %s' % _e)
+            except: pass
+
     try:
         import net as _rah_net
         if not buildin.getattr(_rah_net, '_rah_hooked', False):
@@ -597,6 +633,9 @@ else:
                             _cmd = _a.strip().lower()
                             if _cmd in ('/rah-ui', '/rahui'):
                                 _rahReloadUI()
+                                return
+                            if _cmd == '/shoprace':
+                                _shopRaceDiag()
                                 return
                             if _cmd == '/rah':
                                 _rahReload()

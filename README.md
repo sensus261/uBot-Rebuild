@@ -52,6 +52,10 @@ Bot side (this folder):
 - **SearchBot item filter** — case-insensitive substring match (was case-sensitive, so partial matches often missed).
 - **SearchBot price display** — shows the shop's real **Won + Yang** split in k/kk notation (e.g. `5Won 50kk`, `500kk`) instead of folding everything into yang.
 
+### Auto pickup (added after Phase 1)
+
+- **Auto pickup** — new `Pickup.py`. Walks to the closest ground item the DLL selects (filter, range, items-first and blocked-path rules are applied DLL-side via `eXLib.ItemGrnd*`) and collects it with `eXLib.SendPickupItem`. This needed a DLL fix: `SendPickupItem` used the dead raw send path and silently did nothing; it now calls the client's own `SendItemPickUpPacket` function (`SENDITEMPICKUP_FUNCTION`, see the DLL repo). Run it standalone (hackbar Pickup button / F8) or between fights via the **Pickup** toggle in the Auto-Hunt window. The Pickup window holds include/exclude filter (add by ID or name search), range and delay sliders and the items-first / ignore-blocked-path / avoid-players toggles. Per-item blacklist, `PHASE_GAME` only, NaN-guarded, no teleporting.
+
 ## Phase 2 — TODO (remaining functionality)
 
 Most remaining bots are combat/skill/sync features that depend on the **send-side packet layer**, which is still off. Same methodology as Phase 1.
