@@ -9,6 +9,7 @@ def HasArguments(module, attrlist):
             return False
     return True
 
+wndMgr = None   # resolved by the scan below; None -> fixed default window size (no screen scaling)
 for modulename, module in iter(sys.modules.items()):
     if HasArguments(module, ['GetPlayTime']):player = module
     if HasArguments(module, ['GetNameByVID']):chr = module
@@ -16,6 +17,7 @@ for modulename, module in iter(sys.modules.items()):
     if HasArguments(module, ['ScriptWindow']):ui = module
     if HasArguments(module, ['SetCameraMaxDistance']):app = module
     if HasArguments(module, ['GetItemName', 'SelectItem']):item = module
+    if HasArguments(module, ['GetScreenHeight', 'GetMousePosition']):wndMgr = module
 
 import eXLib
 import FileManager, UIComponents, Movement, OpenLib, Data
@@ -93,7 +95,9 @@ def _nameMatches(needle, name):
             return True
     return False
 
-PICKUP_DEBUG = False
+PICKUP_DEBUG = False  # ON -> _dbg also prints to in-game chat
+PICKUP_TRACE = True   # TEMP diagnostic: _dbg lines go to OpenBot/Saves/pickup_trace.txt (readable from disk). Set False when done.
+_TRACE_PATH = eXLib.PATH + 'OpenBot/Saves/pickup_trace.txt'
 
 PICK_DIST = 100.0        # world units: distance to the item at which SendPickupItem is sent (75 verified in game)
 APPROACH_TIMEOUT = 20.0  # s: give up walking to one item
@@ -108,11 +112,23 @@ YANG_VNUM = 1            # money: not listed under 'recently seen'
 RECENT_MAX = 30          # entries kept in 'recently seen'
 RECENT_POLL = 0.5        # s between ground scans
 
+# Hunt mode (TickForHunt) only: an item more than HUNT_BEHIND_FREE away AND more than HUNT_BEHIND_ANGLE deg
+# off the hunt's travel heading is "behind" us -> skip it rather than run back for it mid-hunt.
+HUNT_BEHIND_FREE = 300.0
+HUNT_BEHIND_ANGLE = 100.0
+HUNT_DRIFT_FACTOR = 1.5  # abort a hunt-mode walk once the item is this many times the hunt radius away
+
 S_IDLE = 0
 S_APPROACH = 1
 S_COOLDOWN = 2
 
 def _dbg(msg):
+    if PICKUP_TRACE:
+        try:
+            f = open(_TRACE_PATH, 'a')
+            f.write('%.2f %s\n' % (OpenLib.GetTime(), msg))
+            f.close()
+        except: pass
     if PICKUP_DEBUG:
         try: chat.AppendChat(3, '[Pickup] ' + str(msg))
         except: pass
@@ -120,6 +136,48 @@ def _dbg(msg):
 def _say(msg):
     try: chat.AppendChat(3, '[uBot] Pickup: ' + str(msg))
     except: pass
+
+
+class _ResizeGrip(ui.Bar):
+    """Bottom-right drag handle. While the left button is held it follows the mouse (resizing the board frame
+    live); on release it asks the owner to rebuild the window with the new list row count. Height only."""
+    def __init__(self, owner):
+        ui.Bar.__init__(self)
+        self._owner = owner
+        self._drag = False
+        self._y0 = 0
+        self._rows0 = 0
+
+    def _mouseY(self):
+        try: return int(wndMgr.GetMousePosition()[1])
+        except: return None
+
+    def OnMouseLeftButtonDown(self):
+        y = self._mouseY()
+        if y is None: return
+        self._drag = True
+        self._y0 = y
+        self._rows0 = self._owner._nRows
+
+    def _rowsNow(self):
+        y = self._mouseY()
+        if y is None: return self._rows0
+        o = self._owner
+        return max(o.MIN_ROWS, min(o._maxRows(), self._rows0 + int(round((y - self._y0) / float(o.ROW_H)))))
+
+    def OnUpdate(self):
+        if not self._drag: return
+        o = self._owner
+        try:
+            h = o.BASE_H + self._rowsNow() * o.ROW_H
+            o.Board.SetSize(545, h)               # live feedback: only the frame grows, children rebuild on release
+            self.SetPosition(545 - 22, h - 22)
+        except: pass
+
+    def OnMouseLeftButtonUp(self):
+        if not self._drag: return
+        self._drag = False
+        self._owner.ApplyResize(self._rowsNow())
 
 
 class PickupBot(BotBase):
@@ -134,6 +192,7 @@ class PickupBot(BotBase):
         self.pickItemsFirst = False
         self.pickItemsIgnorePath = False
         self.pickFilter = set()
+        self.listRows = 0          # rows per list in the window; 0 = auto (scale with the screen), else user-resized
         self._resetRuntime()
         self.LoadConfig()
         self.ApplyConfig()
@@ -170,6 +229,8 @@ class PickupBot(BotBase):
         self.doNotPickupIfPlayerHere = boolean(FileManager.ReadConfig("doNotPickupIfPlayerHere"))
         self.pickItemsFirst = boolean(FileManager.ReadConfig("pickItemsFirst"))
         self.pickItemsIgnorePath = boolean(FileManager.ReadConfig("pickItemsIgnorePath"))
+        try: self.listRows = int(FileManager.ReadConfig("PickupListRows"))
+        except: self.listRows = 0
         self.pickFilter = set()
         for i in FileManager.LoadListFile(FileManager.CONFIG_PICKUP_FILTER):
             try: self.pickFilter.add(int(i))
@@ -183,6 +244,7 @@ class PickupBot(BotBase):
         FileManager.WriteConfig("doNotPickupIfPlayerHere", str(self.doNotPickupIfPlayerHere))
         FileManager.WriteConfig("pickItemsFirst", str(self.pickItemsFirst))
         FileManager.WriteConfig("pickItemsIgnorePath", str(self.pickItemsIgnorePath))
+        FileManager.WriteConfig("PickupListRows", str(int(getattr(self, "listRows", 0))))
         FileManager.SaveListFile(FileManager.CONFIG_PICKUP_FILTER, self.pickFilter)
 
     def ApplyConfig(self):
@@ -248,8 +310,13 @@ class PickupBot(BotBase):
         self.pState = S_IDLE
         self.tVid = 0
 
-    def TickForHunt(self):
-        """Called by AutoHunting between fights. Returns True while pickup is busy (caller should skip its tick)."""
+    def TickForHunt(self, maxDist=None, heading=None):
+        """Called by AutoHunting between fights. Returns True while pickup is busy (caller should skip its tick).
+        maxDist: hunt-mode pickup radius (overrides the much larger standalone PickupRange so the hunt never
+        runs back thousands of units for one item). heading: the hunt's travel direction (deg, GetRotation
+        convention) -> items well behind it are skipped."""
+        self._huntMax = maxDist
+        self._huntHeading = heading
         try:
             self._step()
         except Exception as e:
@@ -259,6 +326,8 @@ class PickupBot(BotBase):
 
     # BotBase hook: standalone mode
     def Frame(self):
+        self._huntMax = None        # standalone mode: full PickupRange, any direction
+        self._huntHeading = None
         try:
             self._step()
         except Exception as e:
@@ -285,6 +354,28 @@ class PickupBot(BotBase):
         _dbg('blacklist vid=%s (%s)' % (self.tVid, why))
         self.blacklist[self.tVid] = now + BLACKLIST_TIME
         self.Abort()
+
+    def _huntAccepts(self, px, py, ix, iy, vid, now):
+        # Hunt-mode gate on a candidate item (standalone mode: always True). Logged at most every 3s.
+        hm = getattr(self, '_huntMax', None)
+        if not hm:
+            return True
+        d = OpenLib.dist(px, py, ix, iy)
+        why = None
+        if d > hm:
+            why = 'beyond hunt radius %.0f' % hm
+        else:
+            hd = getattr(self, '_huntHeading', None)
+            if hd is not None and d > HUNT_BEHIND_FREE:
+                ang = abs((OpenLib.GetRotation(px, py, ix, iy) - hd + 180.0) % 360.0 - 180.0)
+                if ang > HUNT_BEHIND_ANGLE:
+                    why = 'behind us (%.0f deg)' % ang
+        if why is None:
+            return True
+        if now - getattr(self, '_lastSkipDbg', 0.0) > 3.0:
+            self._lastSkipDbg = now
+            _dbg('hunt: skip vid=%s dist=%.0f (%s)' % (vid, d, why))
+        return False
 
     def _step(self):
         if OpenLib.GetCurrentPhase() != OpenLib.PHASE_GAME:
@@ -318,6 +409,8 @@ class PickupBot(BotBase):
                 return   # the DLL only reports the closest item; wait for the blacklist to expire
             if ix != ix or iy != iy:
                 return
+            if not self._huntAccepts(px, py, float(ix), float(iy), vid, now):
+                return
             self.tVid, self.tX, self.tY = vid, float(ix), float(iy)
             self.tStart = now
             self.tBestDist = OpenLib.dist(px, py, self.tX, self.tY)
@@ -333,6 +426,11 @@ class PickupBot(BotBase):
                 self.Abort()
                 return
             d = OpenLib.dist(px, py, self.tX, self.tY)
+            hm = getattr(self, '_huntMax', None)
+            if hm and d > hm * HUNT_DRIFT_FACTOR:
+                _dbg('hunt: vid=%s now %.0f away (> %.0f) -> drop, not walking back' % (self.tVid, d, hm * HUNT_DRIFT_FACTOR))
+                self.Abort()
+                return
             if d <= PICK_DIST:
                 Movement.StopMovement()
                 tries = self.pickTries.get(self.tVid, 0) + 1
@@ -380,15 +478,22 @@ class PickupBot(BotBase):
             return
         self._lastPoll = now
         if OpenLib.GetCurrentPhase() != OpenLib.PHASE_GAME:
+            if (PICKUP_DEBUG or PICKUP_TRACE) and now - getattr(self, '_lastPollDbg', 0.0) > 5.0:
+                self._lastPollDbg = now
+                _dbg('poll skipped: phase=%s (not PHASE_GAME)' % OpenLib.GetCurrentPhase())
             return
         fn = buildin.getattr(eXLib, 'GetGroundItems', None)
         if fn is None:
+            _dbg('eXLib.GetGroundItems missing')
             return
         try:
             items = fn()
         except Exception as e:
             _dbg('GetGroundItems ERR %s' % e)
             return
+        if (PICKUP_DEBUG or PICKUP_TRACE) and now - getattr(self, '_lastPollDbg', 0.0) > 5.0:
+            self._lastPollDbg = now
+            _dbg('poll: %d ground items, %d recent, shown=%s' % (len(items), len(self.recent), int(self.Board.IsShow())))
         current = set()
         for it in items:
             vid, vnum = it[0], it[1]
@@ -412,13 +517,33 @@ class PickupBot(BotBase):
 
     def _refreshRecentList(self):
         self._ensureRecentState()
+        step = 'start'
         try:
+            step = 'RemoveAllItems'
             self.lstRecent.RemoveAllItems()
             for vnum, count, last in self.recent:
-                mark = '*' if vnum in self.pickFilter else ' '
-                self.lstRecent.AppendItem(OpenLib.Item('%d  %s  x%d %s' % (vnum, self._itemName(vnum), count, mark)))
+                # items already in the filter are hidden (kept in self.recent, so they reappear if removed)
+                if vnum in self.pickFilter:
+                    continue
+                step = 'build text vnum=%s count=%s' % (vnum, count)
+                txt = '%d  %s  x%d' % (vnum, self._itemName(vnum), count)
+                step = 'OpenLib.Item(%r)' % txt
+                it = OpenLib.Item(txt)
+                step = 'AppendItem(%r)' % txt
+                self.lstRecent.AppendItem(it)
+            step = 'debug'
+            if PICKUP_DEBUG or PICKUP_TRACE:
+                try: n = len(self.lstRecent.itemList)
+                except: n = '?'
+                try: gp = self.lstRecent.GetGlobalPosition()
+                except: gp = '?'
+                try: sz = (self.lstRecent.GetWidth(), self.lstRecent.GetHeight())
+                except: sz = '?'
+                try: sh = int(self.lstRecent.IsShow())
+                except: sh = '?'
+                _dbg('recent refresh OK: entries=%d listItems=%s pos=%s size=%s shown=%s boardH=%s' % (len(self.recent), n, gp, sz, sh, getattr(self, '_boardH', '?')))
         except Exception as e:
-            _dbg('refresh recent ERR %s' % e)
+            _dbg('refresh recent ERR %s at step [%s]' % (e, step))
 
     def OnAddRecent(self):
         vnum = self._selectedId(self.lstRecent)
@@ -435,16 +560,53 @@ class PickupBot(BotBase):
 
     # ------------------------------------------------------------------ window
     _BTN = ('d:/ymir work/ui/public/Middle_Button_01.sub', 'd:/ymir work/ui/public/Middle_Button_02.sub', 'd:/ymir work/ui/public/Middle_Button_03.sub')
-    UI_VER = 4
+    UI_VER = 5
     SEARCH_MAX = 40
+    # Layout is row based: the recently-seen list (left) sets the window height, H = BASE_H + rows * ROW_H.
+    # 5 rows = 392px = the original fixed size. The filter / results lists (right) share the same height.
+    ROW_H = 20   # ui.ListBoxEx itemStep (measured from a screenshot: rows are 20px apart, not 17)
+    BASE_H = 307
+    MIN_ROWS = 5
+    MAX_ROWS = 40
+    AUTO_SCREEN_FRAC = 0.5   # auto mode: the window takes about this fraction of the screen height
+    AUTO_MAX_ROWS = 16       # ...but auto mode never goes past this (the grip can still go further)
+
+    def _screenH(self):
+        try: return int(wndMgr.GetScreenHeight())
+        except: return 0
+
+    def _maxRows(self):
+        sh = self._screenH()
+        if sh <= 0: return self.MIN_ROWS
+        return max(self.MIN_ROWS, min(self.MAX_ROWS, int((sh - 60 - self.BASE_H) / self.ROW_H)))
+
+    def _rows(self):
+        """Rows per list: the user's saved size if set, else scaled from the screen height (fixed 5 if unknown)."""
+        mx = self._maxRows()
+        lr = getattr(self, 'listRows', 0)   # getattr: a plain /rah keeps the old instance without this attr
+        if lr > 0:
+            return max(self.MIN_ROWS, min(mx, int(lr)))
+        sh = self._screenH()
+        if sh <= 0: return self.MIN_ROWS
+        return max(self.MIN_ROWS, min(mx, self.AUTO_MAX_ROWS, int((sh * self.AUTO_SCREEN_FRAC - self.BASE_H) / self.ROW_H)))
 
     def BuildWindow(self):
         self._uiBuilt = False   # widget callbacks can fire during construction; ignore them until the end
         self.Board = ui.BoardWithTitleBar()
         self.Board.SetTitleName('Pickup')
         self.Board.SetCloseEvent(self.CloseWindow)
-        self.Board.SetSize(545, 392)
+        self._nRows = nrows = self._rows()   # NOT 'rows': BuildWindow reuses that name for the toggle-button tuple below
+        _dbg('screenH=%s listRows=%s -> rows=%d' % (self._screenH(), getattr(self, 'listRows', 0), nrows))
+        rl = nrows * self.ROW_H                      # left list height
+        rrows = (nrows + 5) // 2                     # right lists (filter + results): visible rows
+        rr = rrows * self.ROW_H                     # ...and their pixel height (view count MUST match height)
+        self._boardH = self.BASE_H + rl
+        self.Board.SetSize(545, self._boardH)
         self.Board.SetCenterPosition()
+        if getattr(self, '_restorePos', None):
+            try: self.Board.SetPosition(*self._restorePos)
+            except: pass
+        self._restorePos = None
         self.Board.AddFlag("movable")
         c = self.comp = UIComponents.Component()
         white = c.RGB(255, 255, 255)
@@ -483,21 +645,32 @@ class PickupBot(BotBase):
         self.sldSpeed = c.SliderBar(self.Board, min(1.0, self.pickUpSpeed / 3.0), self.OnSpeedSlide, 62, 213)
         self.lSpeed = c.TextLine(self.Board, '%.1f s' % self.pickUpSpeed, 228, 213, white)
 
-        label('Recently seen items  (* = in filter)', 15, 244, yellow)
-        self.lstRecent, self._scrRecent = c.FileListBox(self.Board, 15, 262, 250, 85, 5)
-        self.btnAddRecent = c.Button(self.Board, 'To filter', '', 15, 355, self.OnAddRecent, *self._BTN)
-        self.btnClearRecent = c.Button(self.Board, 'Clear', '', 105, 355, self.OnClearRecent, *self._BTN)
+        label('Recently seen items  (not in filter)', 15, 244, yellow)
+        self.lstRecent, self._scrRecent = c.FileListBox(self.Board, 15, 262, 250, rl, nrows)
+        self.btnAddRecent = c.Button(self.Board, 'To filter', '', 15, 262 + rl + 8, self.OnAddRecent, *self._BTN)
+        self.btnClearRecent = c.Button(self.Board, 'Clear', '', 105, 262 + rl + 8, self.OnClearRecent, *self._BTN)
 
         # ---- right column: filter list + item search
         label('Filter list', 290, 36, yellow)
-        self.lstFilter, self._scrFilter = c.FileListBox(self.Board, 285, 54, 250, 85, 5)
-        self.btnRemove = c.Button(self.Board, 'Remove', '', 285, 146, self.OnRemoveItem, *self._BTN)
+        fy = 54
+        self.lstFilter, self._scrFilter = c.FileListBox(self.Board, 285, fy, 250, rr, rrows)
+        ry = fy + rr + 7
+        self.btnRemove = c.Button(self.Board, 'Remove', '', 285, ry, self.OnRemoveItem, *self._BTN)
 
-        label('Search item (name or ID)', 290, 186, yellow)
-        self._barSearch, self.editSearch = c.EditLine(self.Board, '', 285, 204, 160, 18, 30)
-        self.btnSearch = c.Button(self.Board, 'Search', '', 455, 202, self.OnSearch, *self._BTN)
-        self.lstResults, self._scrResults = c.FileListBox(self.Board, 285, 230, 250, 85, 5)
-        self.btnAdd = c.Button(self.Board, 'To filter', '', 285, 323, self.OnAddResult, *self._BTN)
+        sy = ry + 40
+        label('Search item (name or ID)', 290, sy, yellow)
+        self._barSearch, self.editSearch = c.EditLine(self.Board, '', 285, sy + 18, 160, 18, 30)
+        self.btnSearch = c.Button(self.Board, 'Search', '', 455, sy + 16, self.OnSearch, *self._BTN)
+        self.lstResults, self._scrResults = c.FileListBox(self.Board, 285, sy + 44, 250, rr, rrows)
+        self.btnAdd = c.Button(self.Board, 'To filter', '', 285, sy + 44 + rr + 8, self.OnAddResult, *self._BTN)
+
+        # resize grip (bottom-right): drag up/down to change the list rows; applied on release
+        self._grip = _ResizeGrip(self)
+        self._grip.SetParent(self.Board)
+        self._grip.SetSize(16, 16)
+        self._grip.SetPosition(545 - 22, self._boardH - 22)
+        self._grip.SetColor(0xAAFFC800)
+        self._grip.Show()
 
         self._uiVer = self.UI_VER
         self._uiBuilt = True
@@ -508,9 +681,11 @@ class PickupBot(BotBase):
         wasShown = False
         try: wasShown = self.Board.IsShow()
         except: pass
+        try: self._restorePos = self.Board.GetGlobalPosition()
+        except: self._restorePos = None
         try: self.Board.Hide()
         except: pass
-        for a in ('Board', 'comp', '_keep', 'lStatus', 'btnEnable', 'btnExclude', 'btnFirst', 'btnPath', 'btnPlayers',
+        for a in ('Board', 'comp', '_keep', '_grip', 'lStatus', 'btnEnable', 'btnExclude', 'btnFirst', 'btnPath', 'btnPlayers',
                   'sldRange', 'lRange', 'sldSpeed', 'lSpeed', 'lstFilter', '_scrFilter', 'btnRemove',
                   '_barSearch', 'editSearch', 'btnSearch', 'lstResults', '_scrResults', 'btnAdd',
                   'lstRecent', '_scrRecent', 'btnAddRecent', 'btnClearRecent'):
@@ -580,6 +755,7 @@ class PickupBot(BotBase):
             return
         self.DelFilterItem(vnum)
         self._refreshFilterList()
+        self._refreshRecentList()
 
     def OnAddResult(self):
         vnum = self._selectedId(self.lstResults)
@@ -587,6 +763,7 @@ class PickupBot(BotBase):
             return
         self.AddFilterItem(vnum)
         self._refreshFilterList()
+        self._refreshRecentList()
 
     def _scanItemList(self, needle):
         """Return (matches, scannedLines) from the client's item_list.txt; raises if the file can't be opened."""
@@ -676,8 +853,20 @@ class PickupBot(BotBase):
                 except Exception as e: _dbg('rebuild ERR %s' % e)
             self.Board.Show()
 
+    def ApplyResize(self, rows):
+        """Called by the grip on release. The rebuild is deferred to the next OnUpdate frame so the grip
+        (whose mouse handler is running right now) is not destroyed from inside its own callback."""
+        self.listRows = max(self.MIN_ROWS, min(self._maxRows(), int(rows)))
+        self._pendingRebuild = True
+        try: self.SaveConfig()
+        except: pass
+
     def OnUpdate(self):
         BotBase.OnUpdate(self)
+        if getattr(self, '_pendingRebuild', False):
+            self._pendingRebuild = False
+            try: self._rebuildWindow()
+            except Exception as e: _dbg('resize rebuild ERR %s' % e)
         try:
             self._pollGround()
             if self._recentDirty and self.Board.IsShow():

@@ -98,6 +98,30 @@ TIME_WAIT = 0.2
 
 TIME_WAIT_MAP_CHANGE = 5
 
+# Intermediate waypoint counts as reached within this distance (was a hard 40). At run speed the char covers
+# ~100+ units per 0.2s tick, so 40 made it arrive, stop, and wait for the next tick (a visible stutter).
+# The LAST waypoint still uses the caller's maxDist.
+WAYPOINT_REACH = 90
+# Passed-waypoint skip: a leading waypoint is dropped when the char is already PAST it along the path
+# (projection onto the next segment > 0) and still close to it. Without this, a path computed while running
+# starts at a point the char has already passed -> it turned back to touch it, then resumed (the "goes back
+# for a moment" while hunting; repeated on every re-path). The proximity cap keeps it from cutting a corner
+# that routes around an obstacle.
+SKIP_PASSED_MAX_DIST = 350
+
+MOV_TRACE = True   # TEMP diagnostic: "[MOV]" lines go to OpenBot/Saves/autohunt_trace.txt. Set False when done.
+_MOV_TRACE_PATH = eXLib.PATH + 'OpenBot/Saves/autohunt_trace.txt'
+
+def _movTrace(msg):
+    if not MOV_TRACE:
+        return
+    try:
+        f = open(_MOV_TRACE_PATH, 'a')
+        f.write("%.2f %s\n" % (OpenLib.GetTime(), msg))
+        f.close()
+    except:
+        pass
+
 #Callback
 def _DestinationReachedCallback():
     mapMovement.SetStateMapChanging()
@@ -243,6 +267,10 @@ class MovementDialog(ui.ScriptWindow):
             self.path = eXLib.FindPath(my_x,my_y,x,y)
             OpenLog.DebugPrint("[MOVEMENT] Path Found with "+str(len(self.path)) +" points")
             if(len(self.path)>0):
+                self.path = list(self.path)
+                n = self._dropPassedWaypoints(my_x, my_y)
+                if n:
+                    _movTrace("[MOV] new path: skipped %d passed waypoint(s), %d left" % (n, len(self.path)))
                 self.currDestinationX = x
                 self.currDestinationY = y
                 self.state = STATE_MOVING
@@ -263,6 +291,23 @@ class MovementDialog(ui.ScriptWindow):
                 return self.GoToPositionAvoidingObjects(x+1,y-1,maxDist,callback)
             
         
+    def _dropPassedWaypoints(self, mx, my):
+        # Drop leading waypoints the char is already past. path[0]=A, path[1]=B: A is "passed" when the char's
+        # projection onto A->B lies beyond A (dot > 0) and the char is still near A (corner-cut guard).
+        # The final waypoint is never dropped here (the normal reach check handles it).
+        n = 0
+        path = self.path
+        while len(path) > 1:
+            ax, ay = path[0]
+            bx, by = path[1]
+            if OpenLib.dist(mx, my, ax, ay) > SKIP_PASSED_MAX_DIST:
+                break
+            if (mx - ax) * (bx - ax) + (my - ay) * (by - ay) <= 0:
+                break
+            path.pop(0)
+            n += 1
+        return n
+
     def GoStraightToPoint(self,x,y):
         OpenLib.RotateMainCharacter(x,y)
         chr.MoveToDestPosition(player.GetMainCharacterIndex(),x, y)
@@ -276,9 +321,12 @@ class MovementDialog(ui.ScriptWindow):
         if not (self.state == STATE_MOVING) or len(self.path) == 0:
             return
         
-        next_x,next_y = self.path[0]
         my_x,my_y,my_z = player.GetMainCharacterPosition()
-        maxdst = 40
+        n = self._dropPassedWaypoints(my_x, my_y)
+        if n:
+            _movTrace("[MOV] skipped %d passed waypoint(s), %d left" % (n, len(self.path)))
+        next_x,next_y = self.path[0]
+        maxdst = WAYPOINT_REACH
         if(len(self.path) == 1):
             maxdst = self.maxDistanceToDest
         if OpenLib.dist(next_x,next_y,my_x,my_y) < maxdst:
@@ -415,5 +463,15 @@ def TeleportToPosition(dst_x,dst_y,max_packets=MAX_TELEPORT_PACKETS):
     eXLib.SendStatePacket(pos[0]+100,pos[1]+100,0.0,1,0)
     return counter
 
-Movement = MovementDialog()
-mapMovement = MapMovementDialog()
+# reload-safe (for /rah): keep the live singletons (their windows drive OnUpdate + hold the in-flight path),
+# just rebind their classes so new logic runs. A second MovementDialog would leave the old one still walking.
+try:
+    Movement
+    Movement.__class__ = MovementDialog
+except NameError:
+    Movement = MovementDialog()
+try:
+    mapMovement
+    mapMovement.__class__ = MapMovementDialog
+except NameError:
+    mapMovement = MapMovementDialog()

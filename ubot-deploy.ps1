@@ -20,7 +20,8 @@ param(
     [string]$Action = 'Status',
 
     # ---- CONFIG ------------------------------------------------------------
-    [string]$GameDir   = 'C:\Games\METIN2 OFICIAL\metin2\ro-RO',   # folder with metin2client.exe
+    #[string]$GameDir   = 'C:\Games\METIN2 OFICIAL\metin2\ro-RO',   # folder with metin2client.exe
+    [string]$GameDir   = 'C:\Games\Metin2 RO\metin2\ro-RO',   # folder with metin2client.exe
     [string]$SourceDir = $PSScriptRoot,                       # where the uBot files live
     [string[]]$Items   = @('eXLib.mix', 'init.py', 'OpenBot'),# what to deploy
     [string]$ClientExe = 'metin2client.exe',
