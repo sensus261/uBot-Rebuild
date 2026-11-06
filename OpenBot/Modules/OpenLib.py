@@ -231,7 +231,9 @@ SKILL_ATTACKS = frozenset([1,2,5,6,16,17,18,20,21,31,32,33,35,36,46,47,48,50,51,
 SKILL_NO_TARGET_ATTACK = frozenset([2,17,18,20,21,33,51,62,77,78,171])
 #   SKILL_TOGGLE = STANDING_SKILL|TOGGLE -> an on/off aura; RECASTING IT TURNS IT OFF. Must be cast ONCE
 #                  to enable and NEVER auto-recast on a timer (that was the "only 1 of N buffs stays up").
-SKILL_TOGGLE = frozenset([63,78,79,174])
+#   63 (sura Enchanted Blade) was REMOVED: on GF 26.1 it is a TIMED buff (client duration 100s + 100s cd), so
+#   treating it as cast-once left it expiring and never refreshed.
+SKILL_TOGGLE = frozenset([78,79,174])
 
 def GetSkillIconPath(id,grade=3):
 	"""

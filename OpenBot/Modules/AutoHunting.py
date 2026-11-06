@@ -40,7 +40,9 @@ import OpenLib, eXLib, FileManager, Data, Movement, Settings, Hooks
 # Focus(range) run on the client's OWN native engine; uBot layers potions/skills/revive for free.
 
 # ===== EXACT official layout constants (GF-25.1.6.0 UIScript/AutoHuntingWindow.py) =====
-PICKUP_SETTLE = 1.2   # s to hold combat after a kill so drops can appear and be collected (pickup-after-kills)
+PICKUP_MAX_BUSY = 6.0   # s: max continuous pickup session during a hunt before combat is forced back
+PICKUP_SUPPRESS = 3.0   # s: pickup stays off after hitting that cap so combat gets a clear window
+PICKUP_SETTLE = 1.2  # s to hold combat after a kill so drops can appear and be collected (pickup-after-kills)
 BOARD_W, BOARD_H                = 254, 517
 SKILL_BAR_X, SKILL_BAR_Y        = 14, 36
 SKILL_TEXT_X, SKILL_TEXT_Y      = 9, 2
@@ -108,7 +110,19 @@ FAST_SWING = True        # swing at ~frame rate while in melee (like holding Spa
 FAST_SWING_TICK = 0.05   # min gap between fast swings (raise toward 0.1 if it feels too spammy)
 SWING_TRACE = False  # debug: one [SW] chat line per swing (needs AH_DEBUG) -- spammy with FAST_SWING
 FACE_TICK = 0.5 # re-face the mob at most this often (0 = every swing, the old behaviour)
-HOLD_SWING_WHEN_PUSHED = True  # in melee but mob beyond ATTACK_RANGE: don't swing (NewAttack would step + break combo)
+# --- Human-like behaviour (set a flag False to restore the old bot-like behaviour) ---
+SMOOTH_FACING   = True   # turn toward the mob in capped steps instead of an instant SetRotation snap
+FACE_DEADZONE   = 30.0   # deg: mob already within this of our heading -> don't touch rotation at all
+FACE_STEP       = 18.0   # deg: max turn per face update (~360 deg/s at the tick below = a human-ish turn rate)
+FACE_STEP_TICK  = 0.05  # s between face updates while turning (used instead of FACE_TICK when SMOOTH_FACING)
+STICKY_TARGET   = True   # only swap a committed target mid-fight (in melee), never while walking to a far mob
+TURN_PENALTY    = 600.0  # acquisition score: extra "distance" for a mob directly behind us (scaled by angle/180)
+PICK_HYSTERESIS = 0.80   # a new pick must score below this * previous pick's score to replace it
+BUFF_WHILE_FAR_APPROACH = True   # cast due buffs while walking to a FAR mob (instead of waiting until melee)
+BUFF_FAR_DIST   = 700            # "far" = target farther than this (dist units)
+PICK_MEMORY     = 2.0   # s a previous pick is remembered for hysteresis
+HOLD_MAX_SECS = 1.5           # max wait for a pushed/ranged mob to re-enter reach before walking to it
+HOLD_SWING_WHEN_PUSHED = True # in melee but mob beyond ATTACK_RANGE: don't swing (NewAttack would step + break combo)
 USE_CUSTOM_ENGINE = True   # PURE CUSTOM: uBot picks nearest + walks to it + attacks via packet (proven
                            # damage) PLUS chr.PushOnceMotion for the visible swing animation. No native
                            # engine (it bricked when mixed with uBot movement control).
@@ -163,11 +177,22 @@ HELPER_ITEMS = [
 
 CONFIG_AH = eXLib.PATH + 'OpenBot/Saves/autohunt.bot'   # persisted Auto-Hunt settings (key=value lines)
 
-AH_DEBUG = True   # ON -> _dbg mirrors diagnostics to in-game chat. Off for release.
+AH_DEBUG = False  # ON -> _dbg mirrors diagnostics to in-game chat. Off for release.
 AH_BUILD = "2026-07-12m-dbg"   # bump every edit -> logged on (re)load so we KNOW /rah actually loaded new code
 
 
+AH_TRACE = True   # TEMP diagnostic: _dbg lines go to OpenBot/Saves/autohunt_trace.txt (NOT chat). Set False when done.
+_TRACE_PATH = eXLib.PATH + 'OpenBot/Saves/autohunt_trace.txt'
+
+
 def _dbg(msg):
+    if AH_TRACE:
+        try:
+            f = open(_TRACE_PATH, 'a')
+            f.write("%.2f %s\n" % (OpenLib.GetTime(), msg))
+            f.close()
+        except:
+            pass
     if AH_DEBUG:
         try:
             chat.AppendChat(3, msg)
@@ -1428,6 +1453,34 @@ class AutoHunting(BotBase):
         self._lastSwing = now
         self._swingAt(tgt)
 
+    def _huntNearDist(self):
+        try:
+            return float(self._attackRange()[1])
+        except:
+            return 400.0
+
+    def _mobWithin(self, maxDist):
+        # any live monster within maxDist of the player (used to make Pickup yield to combat)
+        try:
+            vids = list(eXLib.InstancesList)
+            me = player.GetMainCharacterIndex()
+        except:
+            return False
+        for vid in vids:
+            if vid == me:
+                continue
+            try:
+                if eXLib.IsDead(vid):
+                    continue
+                chr.SelectInstance(vid)
+                if chr.GetInstanceType(vid) != OpenLib.MONSTER_TYPE:
+                    continue
+                if player.GetCharacterDistance(vid) <= maxDist:
+                    return True
+            except:
+                continue
+        return False
+
     def _pickupAbort(self):
         try:
             import Pickup
@@ -1462,8 +1515,32 @@ class AutoHunting(BotBase):
                 if pk.IsBusy():
                     pk.Abort()
                 return False
+            # A mob (e.g. a ranged one that isn't the committed target) is on top of us: fight first. HP-drop
+            # alone is unreliable (potions/regen mask it), which left pickup owning the char while shot at.
+            if now < getattr(self, '_pickSuppressUntil', 0.0):
+                return False
+            if now - getattr(self, '_pickMobChk', 0.0) >= 0.5:
+                self._pickMobChk = now
+                self._pickMobNear = self._mobWithin(self._huntNearDist())
+            if getattr(self, '_pickMobNear', False):
+                if pk.IsBusy():
+                    pk.Abort()
+                self._pickBusySince = 0.0
+                return False
+            # hard cap on one continuous pickup session so it can never starve combat
+            if pk.IsBusy():
+                if not getattr(self, '_pickBusySince', 0.0):
+                    self._pickBusySince = now
+                elif now - self._pickBusySince > PICKUP_MAX_BUSY:
+                    pk.Abort()
+                    self._pickBusySince = 0.0
+                    self._pickSuppressUntil = now + PICKUP_SUPPRESS
+                    return False
             if pk.TickForHunt():
+                if not getattr(self, '_pickBusySince', 0.0):
+                    self._pickBusySince = now
                 return True
+            self._pickBusySince = 0.0
             return now < getattr(self, '_pickSettleUntil', 0.0)   # nothing to collect yet: wait for the drop
         except Exception:
             return False
@@ -1642,6 +1719,19 @@ class AutoHunting(BotBase):
         dx, dy = x - prev[0], y - prev[1]
         if (dx * dx + dy * dy) > 4.0:
             self._stillSince = now
+            # heading estimate = direction of travel (same angle convention as chr.SetRotation). Only trust it
+            # while WALKING (not in melee: there, movement is knockback/mob-push = the opposite of our facing,
+            # which made _smoothFace turn from a wrong base -> "look back, then look further"), and only from a
+            # decent displacement so waypoint jitter doesn't flip it.
+            if not getattr(self, '_inMelee', False):
+                a = getattr(self, '_hdgAnchor', None) or prev
+                if (x - a[0]) ** 2 + (y - a[1]) ** 2 >= 400.0:
+                    self._heading = OpenLib.GetRotation(a[0], a[1], x, y)
+                    self._hdgAnchor = (x, y)
+                else:
+                    self._hdgAnchor = a
+        else:
+            self._hdgAnchor = None
 
     def _zoneRadius(self):
         return self.huntRange + 300   # small slack beyond the hunt range so edge targets are reachable
@@ -1753,6 +1843,7 @@ class AutoHunting(BotBase):
         # step ~5m perpendicular to the target to slip around an invisible (entity) obstacle
         dx, dy = tx - px, ty - py
         L = (dx * dx + dy * dy) ** 0.5 or 1.0
+        _dbg("[NUDGE] fails=%d tgt=%s" % (self._approachFails, self._approachTgt))
         s = 1.0 if (self._approachFails % 2) else -1.0
         nx, ny = px + (-dy / L) * s * 500.0, py + (dx / L) * s * 500.0
         try:
@@ -1933,7 +2024,11 @@ class AutoHunting(BotBase):
             self._approachTgt = 0
             self._inMelee = False   # fresh target -> re-approach it from scratch
             if _old != tgt:
-                _dbg("[TGT] %s -> %s (re-acquired)" % (_old, tgt))   # rapid flip = the 'goes to another mob' jitter
+                try:
+                    _why = "dead" if (_old and eXLib.IsDead(_old)) else ("blacklisted" if _old else "none")
+                except:
+                    _why = "?"
+                _dbg("[TGT] %s -> %s (re-acquired, old=%s)" % (_old, tgt, _why))   # rapid flip = the 'goes to another mob' jitter
         if dbg:
             try: ninst = len(list(eXLib.InstancesList))
             except: ninst = -1
@@ -1965,7 +2060,9 @@ class AutoHunting(BotBase):
         # SMART RETARGET: our committed target is out of reach (knocked back / fled) but ANOTHER valid mob
         # is already inside attack range (probably hitting us) -> switch to it instead of leaving melee to
         # chase the pushed mob. Throttled: _acquireTarget scans every instance.
-        if dist > enterR and now - getattr(self, '_lastRetarget', 0.0) >= ACQUIRE_TICK:
+        # STICKY_TARGET: only swap mid-FIGHT (already in melee); while still walking to a far mob keep it.
+        if dist > enterR and (getattr(self, '_inMelee', False) or not STICKY_TARGET) \
+                and now - getattr(self, '_lastRetarget', 0.0) >= ACQUIRE_TICK:
             self._lastRetarget = now
             alt = self._acquireTarget(mainVID, now, maxDist=enterR, exclude=tgt)
             if alt:
@@ -1982,6 +2079,7 @@ class AutoHunting(BotBase):
         stalled = (now - self._stillSince) >= 0.4
         if not getattr(self, '_inMelee', False):
             if dist <= enterR or (dist <= stayR and stalled):
+                _dbg("[MELEE] ON tgt=%s d=%.0f stalled=%s" % (tgt, dist, stalled))
                 self._inMelee = True
                 try:
                     Movement.StopMovement()   # clear OUR path so NEW_Attack's native move-to-attack +
@@ -1989,6 +2087,7 @@ class AutoHunting(BotBase):
                     pass
                 self._approachGoalPos = None
         elif dist > stayR:
+            _dbg("[MELEE] OFF tgt=%s d=%.0f" % (tgt, dist))
             self._inMelee = False
         if dbg:
             _dbg("[CC] dist=%.0f bow=%s enter=%d melee=%s stalled=%s -> %s" % (
@@ -2003,10 +2102,25 @@ class AutoHunting(BotBase):
         # NewAttack would make the client STEP toward it, breaking the swing/combo (2 hits, stop, 2 hits).
         # Hold the swing instead; the mob normally walks back into reach. stayR still caps the wait.
         if HOLD_SWING_WHEN_PUSHED and dist > enterR:
+            # A ranged mob parks at its own range inside the band and never walks back -> unbounded hold
+            # (bot idles while being shot until the player moves). Cap it, then drop melee so the
+            # approach walks us into reach.
+            hs = getattr(self, '_holdSince', 0.0)
+            if not hs:
+                hs = self._holdSince = now
+            if now - hs > HOLD_MAX_SECS:
+                _dbg("[HOLD] timeout %.1fs d=%.0f -> approach" % (now - hs, dist))
+                self._holdSince = 0.0
+                self._inMelee = False
+                self._approachTgt = 0
+                self._approachGoalPos = None
+                self._approachTarget(tgt, px, py, now)
+                return
             if dbg or now - getattr(self, '_lastHoldDbg', 0.0) > 1.0:
                 self._lastHoldDbg = now
                 _dbg("[HOLD] mob pushed d=%.0f > reach %d -> waiting, no swing" % (dist, enterR))
             return
+        self._holdSince = 0.0
         if now - getattr(self, '_lastSwing', 0.0) >= SWING_TICK:
             self._lastSwing = now
             self._swingAt(tgt)
@@ -2034,6 +2148,11 @@ class AutoHunting(BotBase):
         best_dist = self.huntRange if self.autoRange else 1e9
         if maxDist is not None:
             best_dist = min(best_dist, maxDist + 1)
+        capD = best_dist                # hard distance cap (best_dist is overwritten by the winner's distance)
+        best_score = 1e18
+        scores = {}
+        heading = getattr(self, '_heading', None)
+        me = self._pos(mainVID)
         passed = 0                      # candidates that cleared type+filter (reached the distance test)
         nearD, nearV = 1e18, 0          # nearest such candidate, to see if a range CAP is what's excluding
         ax = ay = None
@@ -2129,11 +2248,30 @@ class AutoHunting(BotBase):
                     tx, ty, tz = eXLib.GetPixelPosition(vid)   # (vid) form works; no-arg raises
                     if (tx - ax) ** 2 + (ty - ay) ** 2 > zr2:
                         continue   # outside the anchored zone -> ignore (anti-drift)
+                if d >= capD:
+                    continue
+                # score = distance + a penalty for mobs behind our heading (avoids 180-degree turns)
+                sc = d
+                if TURN_PENALTY and me is not None and heading is not None:
+                    vp = self._pos(vid)
+                    if vp is not None:
+                        ang = abs(self._angleDiff(heading, OpenLib.GetRotation(me[0], me[1], vp[0], vp[1])))
+                        sc = d + TURN_PENALTY * (ang / 180.0)
+                scores[vid] = sc
             except:
                 continue
-            if d < best_dist:
+            if sc < best_score:
+                best_score = sc
                 best_dist = d
                 best_vid = vid
+        # HYSTERESIS: keep the previous pick unless the new winner is clearly better (stops A/B flip-flop)
+        if maxDist is None and best_vid:
+            pv, pt = getattr(self, '_prevPick', (0, 0.0))
+            if pv and pv != best_vid and now - pt <= PICK_MEMORY and pv in scores \
+                    and best_score > scores[pv] * PICK_HYSTERESIS:
+                best_vid = pv
+            if best_vid != pv or now - pt > PICK_MEMORY:
+                self._prevPick = (best_vid, now)
         if best_vid == 0 and maxDist is None and AH_DEBUG and (now - getattr(self, '_lastAcqDbg', 0.0) > 2.0):
             self._lastAcqDbg = now
             _dbg("[ACQ] none inst=%d passedFilter=%d nearest=(d%.0f v%s) cap=%.0f foc=%d anch=%d" % (
@@ -2170,10 +2308,15 @@ class AutoHunting(BotBase):
         if dist < self._approachMinDist - 50:
             self._approachMinDist = dist
             self._noProgressSince = now
-        if now - self._noProgressSince > 3.0:   # not getting closer -> an (entity-collision) obstacle
+        if STICKY_TARGET and (now - self._stillSince) < 1.0:
+            # We're MOVING, so we're not blocked -- the mob is just fleeing / we're on a detour path. Nudging
+            # (a 500u sidestep) or blacklisting here caused the "turn away, come back, switch mob" pattern.
+            self._noProgressSince = now
+        if now - self._noProgressSince > 3.0:   # not getting closer AND not moving -> an (entity-collision) obstacle
             self._noProgressSince = now
             self._approachFails += 1
             if self._approachFails >= 3:
+                _dbg("[BLACKLIST] tgt=%s (no progress)" % tgt)
                 self._blacklist[tgt] = now + 15.0   # give up on this one; acquire another next tick
                 self._huntTarget = 0
                 self._approachTgt = 0
@@ -2189,7 +2332,11 @@ class AutoHunting(BotBase):
         # trees, and maxDist stops us inside attack range.
         g = getattr(self, '_approachGoalPos', None)
         moved = 1e9 if g is None else OpenLib.dist(tx, ty, g[0], g[1])
-        if g is None or moved > 70:
+        # re-path only when the mob moved a meaningful fraction of the gap: each re-issue changes the first
+        # waypoint and visibly swings the char's heading while chasing a moving mob
+        # (trace showed 6 re-paths in 2.5s on one chase) -> bigger threshold + 0.9s minimum gap per target
+        if g is None or (moved > max(150.0, dist * 0.3) and now - getattr(self, '_lastWalkIssue', 0.0) >= 0.9):
+            self._lastWalkIssue = now
             self._approachGoalPos = (tx, ty)
             enterR = self._attackRange()[0]
             _dbg("[APP] walk dist=%.0f bow=%d stop=%d" % (dist, int(self._isBow()), int(enterR * 0.8)))
@@ -2197,6 +2344,47 @@ class AutoHunting(BotBase):
                 Movement.GoToPositionAvoidingObjects(tx, ty, maxDist=int(enterR * 0.8))
             except:
                 pass
+
+    def _buffWaitLog(self, now, s, why):
+        # trace only: why a DUE buff isn't being cast (throttled per buff, 4s)
+        k = '_bw%s' % s.get('id')
+        if now - getattr(self, k, 0.0) >= 4.0:
+            setattr(self, k, now)
+            _dbg("[BUFFWAIT] id=%s since=%ds blocked: %s" % (s.get('id'), int(now - s.get('lastCast', 0.0)), why))
+
+    def _angleDiff(self, a, b):
+        # signed shortest turn (deg, -180..180) from heading a to heading b
+        return (b - a + 180.0) % 360.0 - 180.0
+
+    def _smoothFace(self, tgt):
+        # Turn toward the mob by at most FACE_STEP per call; do nothing when it's already roughly in front
+        # (FACE_DEADZONE). Replaces the old full snap every FACE_TICK that read as a bot "spin".
+        tp = self._pos(tgt)
+        mp = self._pos(player.GetMainCharacterIndex())
+        if tp is None or mp is None:
+            return
+        want = OpenLib.GetRotation(mp[0], mp[1], tp[0], tp[1])
+        cur = getattr(self, '_heading', None)
+        if cur is None:             # unknown heading -> one initial snap, then smooth from there
+            try:
+                chr.SelectInstance(player.GetMainCharacterIndex())
+                chr.SetRotation(want)
+                self._heading = want
+            except:
+                pass
+            return
+        diff = self._angleDiff(cur, want)
+        if abs(diff) <= FACE_DEADZONE:
+            return
+        step = max(-FACE_STEP, min(FACE_STEP, diff))
+        new = (cur + step) % 360.0
+        _dbg("[FACE] tgt=%s cur=%.0f want=%.0f -> %.0f" % (tgt, cur, want, new))
+        try:
+            chr.SelectInstance(player.GetMainCharacterIndex())
+            chr.SetRotation(new)
+            self._heading = new
+        except:
+            pass
 
     def _swingAt(self, tgt):
         # Animated attack via the CLIENT'S OWN attack: eXLib.NewAttack() -> CPythonPlayer::NEW_Attack(),
@@ -2211,7 +2399,12 @@ class AutoHunting(BotBase):
         # Face the mob only when the target changed or every FACE_TICK s -- snapping the rotation before
         # EVERY swing may reset the client's attack motion/combo (2 hits, stop, 2 hits).
         now = OpenLib.GetTime()
-        if (tgt != getattr(self, '_faceTgt', 0)) or (now - getattr(self, '_lastFace', 0.0) >= FACE_TICK):
+        if SMOOTH_FACING:
+            if now - getattr(self, '_lastFace', 0.0) >= FACE_STEP_TICK:
+                self._lastFace = now
+                self._faceTgt = tgt
+                self._smoothFace(tgt)
+        elif (tgt != getattr(self, '_faceTgt', 0)) or (now - getattr(self, '_lastFace', 0.0) >= FACE_TICK):
             self._faceTgt = tgt
             self._lastFace = now
             tp = self._pos(tgt)
@@ -2313,6 +2506,7 @@ class AutoHunting(BotBase):
                     continue          # still active
             try:
                 if player.IsSkillCoolTime(s['slot']):
+                    self._buffWaitLog(now, s, "cooldown")
                     continue          # on cooldown/GCD -> can't recast yet; let offensive run
             except:
                 continue
@@ -2330,6 +2524,7 @@ class AutoHunting(BotBase):
                 if not (0 < needSp <= maxSp):
                     needSp = int(maxSp * 0.15)   # GetSkillNeedSP unreliable -> low-SP floor guard
                 if curSp < needSp:
+                    self._buffWaitLog(now, s, "sp %d<%d" % (curSp, needSp))
                     continue                     # not enough SP -> skip, keep attacking, retry on regen
             except:
                 pass
@@ -2372,6 +2567,18 @@ class AutoHunting(BotBase):
         # its timer immediately, and move on. It refreshes on its own dur+2 schedule. Combat can NEVER
         # hang (lastCast always advances) and multiple buffs are spaced so their animations don't collide.
         approaching = bool(getattr(self, '_huntTarget', 0)) and not getattr(self, '_inMelee', False)
+        if approaching and BUFF_WHILE_FAR_APPROACH:
+            # a long walk to a far mob (trace: 25-30s on a 2000u chase) must not starve buffs: pausing for the
+            # ~0.6s cast costs nothing when the mob is still far away. Only hold the cast when it's close.
+            try:
+                if player.GetCharacterDistance(self._huntTarget) > BUFF_FAR_DIST:
+                    approaching = False
+            except:
+                pass
+        if dueReady is not None and approaching:
+            self._buffWaitLog(now, dueReady, "approaching target")
+        elif dueReady is not None and (now - getattr(self, '_lastSkillCast', -1.0e9)) < BUFF_GCD:
+            self._buffWaitLog(now, dueReady, "GCD (last skill %.1fs ago)" % (now - getattr(self, '_lastSkillCast', 0.0)))
         if dueReady is not None and not approaching:
             bid = dueReady['id']
             # GCD-SAFE spacing: do NOT cast a buff within BUFF_GCD of ANY skill cast (buff OR offensive). A
@@ -2395,6 +2602,13 @@ class AutoHunting(BotBase):
                     pass
                 if bid in OpenLib.SKILL_TOGGLE:
                     self._toggleDone.add(bid)        # on/off aura -> fire once, never recast (would toggle OFF)
+                try:
+                    _d = int(round(float(skill.GetDuration(bid, player.GetSkillCurrentEfficientPercentage(dueReady['slot'])))))
+                except:
+                    _d = -1
+                _dbg("[BUFFDUR] id=%s GetDuration=%s box=%s since=%ds" % (
+                    bid, _d, self._toInt(dueReady['edit'].GetText(), 0) if dueReady.get('edit') else -1,
+                    int(now - dueReady.get('lastCast', 0.0))))
                 dueReady['lastCast'] = now           # optimistic: recast at dur+2 keeps it refreshed
                 self._lastBuffCastAt = now
                 self._lastSkillCast = now
@@ -2422,6 +2636,11 @@ class AutoHunting(BotBase):
                 castTarget = tvid                      # prefer the mob we're already fighting
         except:
             castTarget = 0
+        # STICKY_TARGET: never swap focus to a different mob just for a skill cast while we have a committed
+        # hunt target (that SetTarget flipped focus to the nearest mob every skill tick and the skill turned
+        # the char toward it = the visible "retarget + turn"). Wait until the committed target is in range.
+        if not castTarget and STICKY_TARGET and self._validTarget(getattr(self, '_huntTarget', 0), now):
+            return
         if not castTarget:
             try:
                 nv = self._findNearestMob(mainVID)     # else the nearest in-range mob
