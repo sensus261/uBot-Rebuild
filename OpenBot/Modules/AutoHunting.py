@@ -40,7 +40,8 @@ import OpenLib, eXLib, FileManager, Data, Movement, Settings, Hooks
 # Focus(range) run on the client's OWN native engine; uBot layers potions/skills/revive for free.
 
 # ===== EXACT official layout constants (GF-25.1.6.0 UIScript/AutoHuntingWindow.py) =====
-BOARD_W, BOARD_H                = 254, 490
+PICKUP_SETTLE = 1.2   # s to hold combat after a kill so drops can appear and be collected (pickup-after-kills)
+BOARD_W, BOARD_H                = 254, 517
 SKILL_BAR_X, SKILL_BAR_Y        = 14, 36
 SKILL_TEXT_X, SKILL_TEXT_Y      = 9, 2
 SKILL_SLOT_X, SKILL_SLOT_Y      = 15, 59
@@ -54,7 +55,7 @@ SET_BAR_X                       = 3
 SET_ROW_Y                       = [20, 47, 74, 101, 128]   # attack/range/potion/skill/restart
 AUTO_BTN_X, AUTO_BTN_BASE_Y, AUTO_BTN_DY = 194, 327, 27
 OPT_BTN_DX                      = 42
-SAVE_X, START_X, END_X, BOTTOM_Y = 10, 88, 166, 459.5
+SAVE_X, START_X, END_X, BOTTOM_Y = 10, 88, 166, 486.5
 SK_COOL_X, SK_COOL_Y, SK_COOL_DY = 15, 93, 54
 PO_COOL_X, PO_COOL_Y, PO_COOL_DY = 20, 173.5, 54   # = POTION_SLOT_Y+34 -> icon->input gap == input->next-icon gap
 # =====================================================================================
@@ -485,6 +486,8 @@ class AutoHunting(BotBase):
         self.autoPotion  = self._cfgBool('autoPotion',  True)
         self.autoSkill   = self._cfgBool('autoSkill',   True)
         self.autoRestart = self._cfgBool('autoRestart', True)
+        self.pickupAfterKills = self._cfgBool('pickupAfterKills', False)   # PRD-auto-pickup Phase 4
+        self._pickLastHp = 0.0
 
         self.huntRange   = self._cfgInt('range', DEFAULT_RANGE)
         self.hpThreshold = self._cfgInt('hp', 50)
@@ -545,11 +548,11 @@ class AutoHunting(BotBase):
         self._buildFrames(POTION_SLOT_X, POTION_SLOT_Y, 18)  # Potions: 3 rows (3rd is empty, for future use)
 
         # 5 setting rows: centered label (left) + On/Off button (x=194), GF-style
-        labels = ['Attack', 'Focus', 'Potions', 'Skills', 'Resurrection']
-        funcs  = [self._setAttack, self._setRange, self._setPotion, self._setSkill, self._setRestart]
-        defs   = [self.autoAttack, self.autoRange, self.autoPotion, self.autoSkill, self.autoRestart]
+        labels = ['Attack', 'Focus', 'Potions', 'Skills', 'Resurrection', 'Pickup']
+        funcs  = [self._setAttack, self._setRange, self._setPotion, self._setSkill, self._setRestart, self._setPickup]
+        defs   = [self.autoAttack, self.autoRange, self.autoPotion, self.autoSkill, self.autoRestart, self.pickupAfterKills]
         self.toggleHolders = []
-        for n in range(5):
+        for n in range(6):
             by = AUTO_BTN_BASE_Y + AUTO_BTN_DY * n
             self._inputLabel(labels[n], SETTING_BAR_X + SET_BAR_X, by + 2, 173, 16, center=True)
             self._mkToggle(AUTO_BTN_X, by, defs[n], funcs[n])
@@ -972,6 +975,13 @@ class AutoHunting(BotBase):
     def _setPotion(self, val):  self.autoPotion  = val
     def _setSkill(self, val):   self.autoSkill   = val
     def _setRestart(self, val): self.autoRestart = val
+    def _setPickup(self, val):
+        self.pickupAfterKills = val
+        if not val:
+            try:
+                import Pickup
+                Pickup.instance.Abort()
+            except: pass
 
     def _mkToggle(self, x, y, default, setter):
         # GF-style On/Off button (Small_Button whose label flips). Off shows the pressed-in (down)
@@ -1097,6 +1107,7 @@ class AutoHunting(BotBase):
         c['autoPotion']  = '1' if self.autoPotion  else '0'
         c['autoSkill']   = '1' if self.autoSkill   else '0'
         c['autoRestart'] = '1' if self.autoRestart else '0'
+        c['pickupAfterKills'] = '1' if self.pickupAfterKills else '0'
         c['range'] = str(self.huntRange)
         c['hp'] = str(self.hpThreshold)
         c['sp'] = str(self.spThreshold)
@@ -1417,6 +1428,46 @@ class AutoHunting(BotBase):
         self._lastSwing = now
         self._swingAt(tgt)
 
+    def _pickupAbort(self):
+        try:
+            import Pickup
+            Pickup.instance.Abort()
+        except: pass
+
+    def _pickupTick(self, now):
+        """Pickup-after-kills (PRD-auto-pickup Phase 4). Runs only when the hunt target is dead/none and
+        past the revive grace. Returns True while Pickup is busy (the caller then skips combat this tick).
+        Yields the moment we take damage (a mob engaged) so combat resumes."""
+        if not self.pickupAfterKills:
+            return False
+        try:
+            import Pickup
+            pk = Pickup.instance
+            hp = float(player.GetStatus(player.HP))
+            tookHit = hp < getattr(self, '_pickLastHp', 0.0) - 0.5
+            self._pickLastHp = hp
+            liveTgt = self._validTarget(self._huntTarget, now)   # a dead mob's stale id must not block pickup after a kill
+            # kill detected (had a live target last tick, none now, no damage taken): hold combat for a short settle
+            # window so the drops can appear + get collected, instead of walking off to the next mob and being pulled
+            # back when the loot shows up (the back-and-forth).
+            if getattr(self, '_pickPrevTgt', 0) and not liveTgt and not tookHit:
+                self._pickSettleUntil = now + PICKUP_SETTLE
+            if liveTgt:
+                self._pickSettleUntil = 0.0
+            self._pickPrevTgt = liveTgt
+            # (_inMelee is NOT checked: it stays True after the mob dies until _customCombat re-evaluates, which would
+            # let combat grab the next mob before Pickup ever sees the drop. liveTgt==0 means the fight is over.)
+            if (liveTgt or now < getattr(self, '_reviveGraceUntil', 0.0)
+                    or tookHit or self._isPlayerDead()):
+                if pk.IsBusy():
+                    pk.Abort()
+                return False
+            if pk.TickForHunt():
+                return True
+            return now < getattr(self, '_pickSettleUntil', 0.0)   # nothing to collect yet: wait for the drop
+        except Exception:
+            return False
+
     def _tick(self):
         if not self._inGame():
             return
@@ -1430,6 +1481,7 @@ class AutoHunting(BotBase):
         mainVID = player.GetMainCharacterIndex()
         if self._isPlayerDead():
             self._wasDead = True       # remember, so we can hold off attacking for a grace period on revive
+            self._pickupAbort()
             self._nativeOn = False
             self._huntTarget = 0
             self._toggleDone = set()   # auras drop on death -> re-enable them after revive
@@ -1472,8 +1524,11 @@ class AutoHunting(BotBase):
                     int(getattr(self, '_inMelee', False)), getattr(self, '_huntTarget', 0), mnt))
             except:
                 pass
+        pickBusy = self._pickupTick(now0)
         if self.autoAttack:
-            if USE_CUSTOM_ENGINE:
+            if pickBusy:
+                pass   # Pickup is collecting drops between fights; combat resumes when it goes idle
+            elif USE_CUSTOM_ENGINE:
                 self._customCombat(mainVID)   # uBot picks + approaches + attacks (no native engine)
             else:
                 self._startNative()   # throttled internally; keeps re-applying until func1 confirmed on

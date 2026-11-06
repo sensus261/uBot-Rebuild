@@ -9,6 +9,7 @@ Adapts the walker + bots to the **26.1.11** client. Pairs with the rebuilt `eXLi
 ## Bots
 - **Trading Glass / Shop search** — `ShopSearcher.py`: full-map A\* sweep with checkpoints, working class filter, NaN guards, and **Stop now halts the character immediately** (cancels the in-flight move, like EnergyBot).
 - **Stone Compass** — `StoneCompass.py`: reload-safe; metin / ore / boss detection via eXLib; added to `/rah`.
+- **Auto pickup** — `Pickup.py` (new): walks to the closest eligible ground item and collects it via `eXLib.SendPickupItem` (needs the rebuilt `eXLib.mix` whose `SendPickupItem` calls the client's own pickup function). Toggle from the hackbar Pickup button / F8, or enable "Pickup" in the Auto-Hunt window to collect drops between fights. Per-item blacklist, `PHASE_GAME`-only, NaN-guarded. Replaces the stubbed `Settings.PickUp()`; Settings now only delegates.
 - **Auto-hunt** — `AutoHunting.py`: level-filtered acquisition + focus/skill logic on eXLib positions; reload-safe.
 - **Energy bot** — `EnergyBot.py`: dynamic inventory sizing, clock-reset-safe timers, and `GetDialogAnswerCount`-based dialog auto-pick (second-to-last = Open Shop) **with the "I have Weapon Shop mission" checkbox as fallback** (active until the event-mgr RVA is re-derived on eXLib side).
 - **Manual-intervention-stops-movement** — `OpenLib.py`: while a bot is pathing, moving the character against the commanded direction for ~0.36 s stops the path (`StopMovement` + stops the sweep / EnergyBot driver). Tunable via `MANUAL_STOP_MOVE_EPS` / `MANUAL_STOP_TICKS`.

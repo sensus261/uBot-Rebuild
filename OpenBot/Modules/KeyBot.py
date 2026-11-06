@@ -277,11 +277,8 @@ class Keybot(BotBase):
             Settings.instance.loginBtn.SetOn()
 
     def SwitchPickUp(self):
-        from OpenBot.Modules import Settings
-        if Settings.instance.pickupButton.isOn:
-            Settings.instance.pickupButton.SetOff()
-        else:
-            Settings.instance.pickupButton.SetOn()
+        from OpenBot.Modules import Pickup
+        Pickup.instance.SetEnabled(not Pickup.instance.IsEnabled())
 
     def SwitchActionBot(self):
         from OpenBot.Modules.Actions import ActionBot

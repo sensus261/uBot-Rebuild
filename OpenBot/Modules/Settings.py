@@ -90,18 +90,8 @@ class SettingsDialog(ui.ScriptWindow):
 		self.minMana = 95
 		self.minHealth = 80
 		self.speedMultiplier = 0.0
-		self.pickItemsFirst = False
 		self.lastTimeDead = OpenLib.GetTime()
 
-		self.pickUp = False
-		self.pickUpRange = 290.0
-		self.pickUpSpeed = 0.5
-		self.pickFilter = set()
-		self.excludeInFilter = True
-		self.useRangePickup = False
-		self.doNotPickupIfPlayerHere = False
-		self.checkIsWallBetweenPlayerAndItem = False
-		self.pickItemsIgnorePath = False
 
 		self.useOnClickDmg = False
 		self.onClickDmgSpeed = 0.0
@@ -134,7 +124,6 @@ class SettingsDialog(ui.ScriptWindow):
 
 		self.TabWidget = UIComponents.TabWindow(10,30,300-20,370-40,self.Board,['General', 'CH'])
 		self.generalTab = self.TabWidget.GetTab(0)
-		# self.pickupTab = self.TabWidget.GetTab(1)
 		# self.attackTab = self.TabWidget.GetTab(2)
 		# self.shopTab = self.TabWidget.GetTab(3)
 		self.channelsTab = self.TabWidget.GetTab(1)
@@ -161,23 +150,8 @@ class SettingsDialog(ui.ScriptWindow):
         #                                      'd:/ymir work/ui/public/Middle_Button_01.sub',
         #                                      'd:/ymir work/ui/public/Middle_Button_02.sub',
         #                                      'd:/ymir work/ui/public/Middle_Button_03.sub')
-		##PICKUP
-		# self.pickupButton,self.SlidePickupSpeed,self.speedPickupLabel = UIComponents.GetSliderButtonLabel(self.pickupTab,self.pickupSpeedSlide, '', 'Enable Pickup', 30, 18,image= eXLib.PATH + "OpenBot/Images/General/pickup.tga",funcState=self.OnPickupOnOff,defaultValue=int(self.pickUp),defaultSlider=float(self.pickUpSpeed/3.0))
-		# self.rangePickupButton,self.SliderangePickup,self.rangePickupLabel = UIComponents.GetSliderButtonLabel(self.pickupTab,self.pickupRangeSlide, 'Range', 'Enable Range Pickup', 15, 60,funcState=self.OnRangePickupOnOff,offsetX=30,offsetY=4,defaultValue=int(self.useRangePickup),defaultSlider=float(self.pickUpRange/10000.0))
-		# self.ItemValueText = self.comp.TextLine(self.pickupTab, 'Search Item:', 15, 270, self.comp.RGB(255, 255, 255))
-		# self.SearchPickItemButton = self.comp.Button(self.pickupTab, 'Search', '', 210, 268,  self.UpdatePickFilterList, 'd:/ymir work/ui/public/small_Button_01.sub', 'd:/ymir work/ui/public/small_Button_02.sub', 'd:/ymir work/ui/public/small_Button_03.sub')
-		# self.AddPickItemBtn = self.comp.Button(self.pickupTab, 'Add Item', '', 200, 200, self.OpenPickItemDialog, 'd:/ymir work/ui/public/Middle_Button_01.sub', 'd:/ymir work/ui/public/Middle_Button_02.sub', 'd:/ymir work/ui/public/Middle_Button_03.sub')
-		# self.PickCancelBtn = self.comp.Button(self.pickupTab, 'Remove', '', 200, 230, self.UIPickRemoveFilterItem, 'd:/ymir work/ui/public/Middle_Button_01.sub', 'd:/ymir work/ui/public/Middle_Button_02.sub', 'd:/ymir work/ui/public/Middle_Button_03.sub')
-		# self.PickSearchItemSlotBar, self.PickSearchItemEditLine = self.comp.EditLine(self.pickupTab, '', 85, 270, 110, 15, 20)
-		# self.labelFilter = self.comp.TextLine(self.pickupTab, 'Pickup Filter', 115, 90, self.comp.RGB(255, 255, 0))
 		
-		# self.pickItemsFirstBtn = self.comp.OnOffButton(self.pickupTab, '\t\t\tItems first', 'Will pick items before yang', 180, 150,funcState=self.OnChangePickItemFirst,defaultValue=int(self.pickItemsFirst))
-		# self.pickItemsIgnorePathBtn = self.comp.OnOffButton(self.pickupTab, '\t\t\tIgnore Block Path', "Doesn't pick items with path blocked", 180, 170,funcState=self.OnChangePickItemsIgnorePath,defaultValue=int(self.pickItemsIgnorePath))
 		
-		# self.PickfilterModeBtn = self.comp.OnOffButton(self.pickupTab, '\t\t\tExclude Items', 'If not selected will only pick items in the list', 180, 130,funcState=self.OnChangePickMode,defaultValue=int(self.excludeInFilter))
-		# self.doNotPickupIfPlayerNear = self.comp.OnOffButton(self.pickupTab, '\t\t\tAvoid players', 'If you select this option, pickup will work only when there are not any player', 180, 110,funcState=self.OnDoNotPickupIfPlayerNear,defaultValue=int(self.doNotPickupIfPlayerHere))
-		#self.checkIsWallBetweenPlayerAndItemBtn = self.comp.OnOffButton(self.pickupTab, '\t\t\tNo lags mode', 'If this option is checked, OpenBot will check is wall between player and item', 190, 90,funcState=self.OnDoNotPickupIfPlayerNear,defaultValue=int(self.doNotPickupIfPlayerHere))
-		# self.PickbarItems, self.PickfileListBox, self.PickScrollBar = self.comp.ListBoxEx2(self.pickupTab, 15, 117, 140, 150)
 
 
 		##SHOP
@@ -225,32 +199,10 @@ class SettingsDialog(ui.ScriptWindow):
 		self.speedMultiplier = float(FileManager.ReadConfig("SpeedHackMultiplier"))
 		self.minMana = int(FileManager.ReadConfig("MinMana"))
 		self.minHealth = int(FileManager.ReadConfig("MinHealth"))
-		self.pickUp = boolean(FileManager.ReadConfig("PickupUse"))
-		self.pickUpRange = float(FileManager.ReadConfig("PickupRange"))
-		self.pickUpSpeed = float(FileManager.ReadConfig("PickupSpeed"))
-		self.excludeInFilter = boolean(FileManager.ReadConfig("FilterMode"))
-		self.useRangePickup = boolean(FileManager.ReadConfig("UseRangePickup"))
 		self.wallHack = boolean(FileManager.ReadConfig("WallHack"))
 		self.onClickDmgSpeed  = boolean(FileManager.ReadConfig("OnClickDamageSpeed"))
 		self.antiExp = boolean(FileManager.ReadConfig("antiExp"))
-		self.doNotPickupIfPlayerHere = boolean(FileManager.ReadConfig("doNotPickupIfPlayerHere"))
-		self.pickItemsFirst = boolean(FileManager.ReadConfig("pickItemsFirst"))
-		self.pickItemsIgnorePath = boolean(FileManager.ReadConfig("pickItemsIgnorePath"))
-
-		if(self.pickItemsIgnorePath):
-			eXLib.ItemGrndInBlockedPath()
-		else:
-			eXLib.ItemGrndNotInBlockedPath()
-
-		if(self.pickItemsFirst):
-			eXLib.ItemGrndItemFirst()
-		else:
-			eXLib.ItemGrndNoItemFirst()
-
-		eXLib.ItemGrndSelectRange(self.pickUpRange)
-
-		for i in FileManager.LoadListFile(FileManager.CONFIG_PICKUP_FILTER):
-			self.addPickFilterItem(int(i))
+		# pickup config + eXLib.ItemGrnd* push moved to Pickup.py (single owner)
 		self.sellItems = {int(i) for i in FileManager.LoadListFile(FileManager.CONFIG_SELL_INVENTORY)}
 
 	def SaveSettings(self):
@@ -263,22 +215,13 @@ class SettingsDialog(ui.ScriptWindow):
 		FileManager.WriteConfig("SpeedHackMultiplier", str(self.speedMultiplier))
 		FileManager.WriteConfig("MinMana", str(self.minMana))
 		FileManager.WriteConfig("MinHealth", str(self.minHealth))
-		FileManager.WriteConfig("PickupUse", str(self.pickUp))
-		FileManager.WriteConfig("PickupRange", str(self.pickUpRange))
-		FileManager.WriteConfig("PickupSpeed", str(self.pickUpSpeed))
-		FileManager.WriteConfig("FilterMode", str(self.excludeInFilter))
-		FileManager.WriteConfig("UseRangePickup", str(self.useRangePickup))
 		FileManager.WriteConfig("WallHack", str(self.wallHack))
 		FileManager.WriteConfig("OnClickDamageSpeed", str(self.onClickDmgSpeed))
 		FileManager.WriteConfig("antiExp", str(self.antiExp))
 		FileManager.WriteConfig("timeAfterDead", str(7))
-		FileManager.WriteConfig("doNotPickupIfPlayerHere", str(self.doNotPickupIfPlayerHere))
-		FileManager.WriteConfig("pickItemsFirst", str(self.pickItemsFirst))
-		FileManager.WriteConfig("pickItemsIgnorePath", str(self.pickItemsIgnorePath))
 
 		
 		#chat.AppendChat(3,str(self.pickUp))
-		FileManager.SaveListFile(FileManager.CONFIG_PICKUP_FILTER,self.pickFilter)
 		FileManager.SaveListFile(FileManager.CONFIG_SELL_INVENTORY,self.sellItems)
 		FileManager.Save()
 
@@ -288,18 +231,16 @@ class SettingsDialog(ui.ScriptWindow):
 	# 	KeyBot.instance.switch_state()
 
 	def OnDoNotPickupIfPlayerNear(self, val):
-		self.doNotPickupIfPlayerHere = val
+		import Pickup
+		Pickup.instance.doNotPickupIfPlayerHere = val
 
 	def OnCanFarmbotExchangeToShop(self, val):
 		self.canFarmbotSellBool = val
 
 	def OnChangePickItemFirst(self,val):
-		self.pickItemsFirst = val
-		if(self.pickItemsFirst):
-			eXLib.ItemGrndItemFirst()
-		else:
-			eXLib.ItemGrndNoItemFirst()
-
+		import Pickup
+		Pickup.instance.pickItemsFirst = val
+		Pickup.instance.ApplyConfig()
 
 	def OnCanFarmbotExchangeToEnergy(self, val):
 		self.canFarmbotExchangeEnergyBool = val
@@ -375,10 +316,11 @@ class SettingsDialog(ui.ScriptWindow):
 	# 	self.rangePickupLabel.SetText(str('{:,.0f}'.format(self.pickUpRange)))
 
 	def OnRangePickupOnOff(self,val):
-		self.useRangePickup = val
+		pass
 
 	def OnPickupOnOff(self,val):
-		self.pickUp = val		
+		import Pickup
+		Pickup.instance.SetEnabled(val)
 
 	def ReviveOnOff(self,val):
 		self.restartHere = val
@@ -516,40 +458,17 @@ class SettingsDialog(ui.ScriptWindow):
 
 	#PICKUP
 	def OnChangePickMode(self,val):
-		self.excludeInFilter = val
-		if not val:
-			eXLib.ItemGrndOnFilter()
-		else:
-			eXLib.ItemGrndNotOnFilter()
+		import Pickup
+		Pickup.instance.excludeInFilter = val
+		Pickup.instance.ApplyConfig()
 
 	def delPickFilterItem(self,id):
-		eXLib.ItemGrndDelFilter(id)
-		self.pickFilter.remove(int(id))
+		import Pickup
+		Pickup.instance.DelFilterItem(id)
 
 	def addPickFilterItem(self,id):
-		eXLib.ItemGrndAddFilter(id)
-		self.pickFilter.add(int(id))
-		
-	def PickUp(self):
-		if self.pickUp:
-
-			if self.doNotPickupIfPlayerHere:
-				if OpenLib.IsAnyPlayerHere():
-					return
-
-			val, Data.time_Settings_pickUpTimer = OpenLib.timeSleep(Data.time_Settings_pickUpTimer,self.pickUpSpeed)
-			if not val:
-				return
-			if OpenLib.GetCurrentPhase() != OpenLib.PHASE_GAME:
-				return
-			x,y,z = player.GetMainCharacterPosition()
-			vid,itemX,itemY = eXLib.GetCloseItemGround(x,y)
-			if vid == 0:
-				return
-			dst = OpenLib.dist(x,y,itemX,itemY)
-			allowedRange = max(self.pickUpRange,float(OpenLib.MAX_PICKUP_DIST)) 
-			if dst <= allowedRange:
-				return
+		import Pickup
+		Pickup.instance.AddFilterItem(id)
 
 	def Close(self):
 		self.Board.Hide()
@@ -578,7 +497,6 @@ class SettingsDialog(ui.ScriptWindow):
 	def OnUpdate(self):
 		self.CheckUsePotions()
 		self.checkReviveAndLogin()
-		self.PickUp()
 		self.antiExpFunc()
 		self.UseOnClickDamage()
 

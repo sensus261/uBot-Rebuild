@@ -21,18 +21,19 @@ There is no build, lint, or test suite. Code is plain Python 2.7 source executed
 **Client-module resolution** — the GF client obfuscates/renames its built-in modules (even prefixing attributes, e.g. `myth01734…`). `Modules/Hooks.py` and `init.py` locate `chr`, `net`, `player`, `chat`, `app`, etc. by scanning `sys.modules` for signature attributes (`HasArguments`). Use those resolved handles rather than `import chr`/`import net` in new code.
 
 **`OpenBot/Modules/`** — one file per feature, mostly singletons exposing an `instance`:
-- `OpenLib.py`: shared movement/path helpers (A* via `GoToPositionAvoidingObjects`, `StopMovement`, manual-intervention-stops-path detection); the common dependency for bots.
+- `OpenLib.py`: shared helpers (timers, phase, distance, player checks) and manual-intervention-stops-path detection; the common dependency for bots. The A* path helpers (`GoToPositionAvoidingObjects`, `StopMovement`) live in `Movement.py`, not `OpenLib`.
 - `Hooks.py` / `Data.py`: game-window/phase hooks and shared state (`Data.*` serverInfo/mainVID/empireID is still partly unpopulated — see README "Stage 0").
 - `Actions/` (`ActionBot`, `Action*`): scripted action sequences loaded from `Saves/Actions/*.action`, used by EnergyBot/NPC flows.
-- Bots/UI: `ShopSearcher` (Trading Glass sweep), `Shopcreator` (ShopBot), `EnergyBot`, `AutoHunting`, `StoneCompass`, `ChannelSwitcher`, `KeyBot`, `Skillbot`, `Settings`, etc. `UIComponents` wraps the client's `ui` widgets.
+- Bots/UI: `ShopSearcher` (Trading Glass sweep), `Shopcreator` (ShopBot), `Pickup` (auto pickup: walks to the closest ground item the DLL selects and collects it with `eXLib.SendPickupItem`; standalone via the Pickup window/F8, or between fights via `AutoHunting`'s "Pickup" toggle; owns the `eXLib.ItemGrnd*` config and `Saves/pickup_filter.txt`), `EnergyBot`, `AutoHunting`, `StoneCompass`, `ChannelSwitcher`, `KeyBot`, `Skillbot`, `Settings`, etc. `UIComponents` wraps the client's `ui` widgets.
 - Many other modules (DmgHacks, Telehack, Farming/Mining, Buffbot, Radar, AutoDungeon…) depend on the send-side packet layer, which is **disabled** in the DLL — treat them as dormant/not working unless the README's Phase 2 work has landed.
 
 **Data**: `OpenBot/Maps/*.dat` (collision/walk data for pathfinding), `Saves/` (user configs, NPC maps, filters), `Images/` (TGA UI assets), `lib/` (vendored simplejson, decimal, numbers, struct for Py2.7).
 
 ## Conventions & gotchas
 
-- **Hot-reload safety**: modules in `_RAH_RELOAD_LIST` (`init.py`: OpenLib, ShopSearcher, EnergyBot, AutoHunting, StoneCompass, Shopcreator) must stay reload-safe — the module bottom rebinds the live singleton's class instead of creating a second instance/window. Preserve this pattern when editing them, and add new hot-reloadable modules to that list (and `/rah-ui`'s rebuild list if they have `_rebuildWindow`). The `/rah` hook lives in `init.py` precisely because it is never reloaded.
+- **Hot-reload safety**: modules in `_RAH_RELOAD_LIST` (`init.py`: OpenLib, ShopSearcher, EnergyBot, AutoHunting, StoneCompass, Shopcreator, Pickup) must stay reload-safe — the module bottom rebinds the live singleton's class instead of creating a second instance/window. Preserve this pattern when editing them, and add new hot-reloadable modules to that list (and `/rah-ui`'s rebuild list if they have `_rebuildWindow`). The `/rah` hook lives in `init.py` precisely because it is never reloaded.
 - **Positions**: use `eXLib.GetPixelPosition`, never `chr.GetPixelPosition` (returns NaN on 26.1.11 and silently breaks distance math). Guard against NaN.
+- **No codecs in the client's Python**: `str.decode(...)` and `unicodedata` fail inside the client (codec modules aren't bundled), so don't decode/normalize item or chat text; compare raw characters (see `Pickup._nameMatches`). Also hold a reference to every `TextLine`/widget you create (e.g. in a `_keep` list) or the GC destroys it and the label vanishes.
 - **Offsets/signatures are build-specific**: the DLL finds game functions by AOB signature, and the client updates often. A client patch can break eXLib without any Python change; fixes then belong in the DLL repo.
 - Debug output is gated by per-module flags (`AH_DEBUG`, `EB_DEBUG`, `DEBUG` in ShopSearcher, `STATUS_DEBUG`, `PHASE1_DEBUG`, `MANUAL_STOP_DEBUG`); keep them `False` in committed code.
 - Game automation violates the game's ToS; `docs/ISSUE-safety-concerns.md` documents the trust risks of the unreviewed `eXLib.mix` binary.

@@ -189,17 +189,12 @@ class uiShortcut(ui.ScriptWindow):
             self.btnWaithack.SetOn()
 
     def pickupSwitch(self,state):
-        import Settings
-        if state:
-            Settings.instance.pickupButton.SetOn()
-        else:
-            Settings.instance.pickupButton.SetOff()
+        import Pickup
+        Pickup.instance.SetEnabled(state)
 
     def PickupHotkeyPressed(self):
-        if self.btnPickup.IsOn:
-            self.btnPickup.SetOff()
-        else:
-            self.btnPickup.SetOn()
+        import Pickup
+        Pickup.instance.SetEnabled(not Pickup.instance.IsEnabled())
 
     
 
