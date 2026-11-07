@@ -116,3 +116,4 @@ doNotPickupIfPlayerHere=False
 pickItemsFirst=False
 pickItemsIgnorePath=False
 HasWeaponShopQuest=True
+PickupListRows=30

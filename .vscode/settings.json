@@ -1,0 +1,42 @@
+{
+  // RESTORE TERMINALS
+  "restoreTerminals.runOnStartup": true,
+
+  "restoreTerminals.terminals": [
+    {
+      "splitTerminals": [
+        {
+          "name": "GIT",
+          "commands": []
+        }
+      ]
+    },
+    {
+      "splitTerminals": [
+        {
+          "name": "CLAU",
+          "commands": ["claude"],
+          "shouldRunCommands": false
+        }
+      ]
+    },
+    {
+      "splitTerminals": [
+        {
+          "name": "CUSTOM",
+          "commands": [],
+          "shouldRunCommands": false
+        }
+      ]
+    },
+    {
+      "splitTerminals": [
+        {
+          "name": "LINKER",
+          "commands": [".\\ubot-deploy.ps1 Status"],
+          "shouldRunCommands": false
+        }
+      ]
+    }
+  ]
+}
