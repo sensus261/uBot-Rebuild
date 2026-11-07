@@ -118,6 +118,19 @@ HUNT_BEHIND_FREE = 300.0
 HUNT_BEHIND_ANGLE = 100.0
 HUNT_DRIFT_FACTOR = 1.5  # abort a hunt-mode walk once the item is this many times the hunt radius away
 
+# The constants above are the STANDALONE defaults. When AutoHunting is loaded, its Config window (Pickup
+# section) owns these values: _pv() reads them live from AutoHunting.instance._tv (soft lookup, no import ->
+# no load-order dependency). Keys: see AutoHunting.TUNING 'Pickup' rows.
+def _pv(key, default):
+    for name in ('OpenBot.Modules.AutoHunting', 'AutoHunting'):   # init imports it package-qualified
+        m = sys.modules.get(name)
+        try:
+            if key in m.TUNING_DEFAULTS:
+                return m.instance._tv(key)
+        except:
+            pass
+    return default
+
 S_IDLE = 0
 S_APPROACH = 1
 S_COOLDOWN = 2
@@ -352,7 +365,7 @@ class PickupBot(BotBase):
 
     def _giveUp(self, why, now):
         _dbg('blacklist vid=%s (%s)' % (self.tVid, why))
-        self.blacklist[self.tVid] = now + BLACKLIST_TIME
+        self.blacklist[self.tVid] = now + _pv('pickSkipSecs', BLACKLIST_TIME)
         self.Abort()
 
     def _huntAccepts(self, px, py, ix, iy, vid, now):
@@ -366,9 +379,9 @@ class PickupBot(BotBase):
             why = 'beyond hunt radius %.0f' % hm
         else:
             hd = getattr(self, '_huntHeading', None)
-            if hd is not None and d > HUNT_BEHIND_FREE:
+            if hd is not None and d > _pv('pickBehindDist', HUNT_BEHIND_FREE):
                 ang = abs((OpenLib.GetRotation(px, py, ix, iy) - hd + 180.0) % 360.0 - 180.0)
-                if ang > HUNT_BEHIND_ANGLE:
+                if ang > _pv('pickBehindAngle', HUNT_BEHIND_ANGLE):
                     why = 'behind us (%.0f deg)' % ang
         if why is None:
             return True
@@ -427,15 +440,16 @@ class PickupBot(BotBase):
                 return
             d = OpenLib.dist(px, py, self.tX, self.tY)
             hm = getattr(self, '_huntMax', None)
-            if hm and d > hm * HUNT_DRIFT_FACTOR:
-                _dbg('hunt: vid=%s now %.0f away (> %.0f) -> drop, not walking back' % (self.tVid, d, hm * HUNT_DRIFT_FACTOR))
+            drift = _pv('pickDrift', HUNT_DRIFT_FACTOR)
+            if hm and d > hm * drift:
+                _dbg('hunt: vid=%s now %.0f away (> %.0f) -> drop, not walking back' % (self.tVid, d, hm * drift))
                 self.Abort()
                 return
-            if d <= PICK_DIST:
+            if d <= _pv('pickDist', PICK_DIST):
                 Movement.StopMovement()
                 tries = self.pickTries.get(self.tVid, 0) + 1
                 self.pickTries[self.tVid] = tries
-                if tries > MAX_PICK_TRIES:
+                if tries > _pv('pickTries', MAX_PICK_TRIES):
                     self._giveUp('pick had no effect', now)
                     return
                 r = eXLib.SendPickupItem(self.tVid)
@@ -443,16 +457,16 @@ class PickupBot(BotBase):
                 if r == 0 and tries == 1:
                     _say('SendPickupItem returned 0 - eXLib.mix is too old (needs the pickup-leaf build)')
                 self.pickedCount += 1
-                self.cooldownUntil = now + max(COOLDOWN_MIN, min(self.pickUpSpeed, COOLDOWN_MAX))
+                self.cooldownUntil = now + max(_pv('pickCdMin', COOLDOWN_MIN), min(self.pickUpSpeed, _pv('pickCdMax', COOLDOWN_MAX)))
                 self.pState = S_COOLDOWN
                 return
             if d < self.tBestDist - PROGRESS_MIN:
                 self.tBestDist = d
                 self.tBestTime = now
-            if now - self.tStart > APPROACH_TIMEOUT:
+            if now - self.tStart > _pv('pickWalkTimeout', APPROACH_TIMEOUT):
                 self._giveUp('approach timeout', now)
                 return
-            if now - self.tBestTime > NO_PROGRESS_TIMEOUT:
+            if now - self.tBestTime > _pv('pickStuckTimeout', NO_PROGRESS_TIMEOUT):
                 self._giveUp('no progress', now)
                 return
             res = Movement.GoToPositionAvoidingObjects(self.tX, self.tY)

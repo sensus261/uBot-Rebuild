@@ -533,7 +533,8 @@ else:
     # The hook lives in script.py (run once, never reloaded) so it survives every /rah.
     # deps first. The main hot-reloaded features: OpenLib (shared), ShopSearcher (trading glass) + EnergyBot,
     # then AutoHunting. All are reload-safe (class-rebind singletons) so /rah swaps their LOGIC in place.
-    _RAH_RELOAD_LIST = ['OpenBot.Modules.OpenLib', 'OpenBot.Modules.Movement', 'OpenBot.Modules.ShopSearcher',
+    _RAH_RELOAD_LIST = ['OpenBot.Modules.OpenLib', 'OpenBot.Modules.MapGrid', 'OpenBot.Modules.Movement',
+                        'OpenBot.Modules.ShopSearcher',
                         'OpenBot.Modules.EnergyBot', 'OpenBot.Modules.AutoHunting',
                         'OpenBot.Modules.StoneCompass', 'OpenBot.Modules.Shopcreator',
                         'OpenBot.Modules.Pickup']

@@ -463,6 +463,23 @@ def TeleportToPosition(dst_x,dst_y,max_packets=MAX_TELEPORT_PACKETS):
     eXLib.SendStatePacket(pos[0]+100,pos[1]+100,0.0,1,0)
     return counter
 
+def FollowPath(points, maxDist=250):
+    """
+    Walk a path computed OUTSIDE the DLL (e.g. MapGrid's Python A* on maps the DLL has no collision data
+    for) with the normal waypoint follower. points = [(x, y), ...] in the same world units FindPath returns.
+    """
+    if not points:
+        return NO_PATH_FOUND
+    mapMovement.Stop()
+    m = Movement
+    m.maxDistanceToDest = maxDist
+    m.callback = None
+    m.path = [(float(px), float(py)) for px, py in points]
+    m.currDestinationX, m.currDestinationY = m.path[-1]
+    m.state = STATE_MOVING
+    Data.time_Movement_stoppedTimer = OpenLib.GetTime()
+    return MOVING
+
 # reload-safe (for /rah): keep the live singletons (their windows drive OnUpdate + hold the in-flight path),
 # just rebind their classes so new logic runs. A second MovementDialog would leave the old one still walking.
 try:

@@ -42,9 +42,9 @@ A buff is **due and ready** when all of these hold:
 
 The first due-and-ready buff is cast only if:
 
-- the char is **not mid-approach** to a target (unless the target is farther than `BUFF_FAR_DIST`,
+- the char is **not mid-approach** to a target (unless the target is farther than `buffFarDist` (Config window, default 700),
   when `BUFF_WHILE_FAR_APPROACH` is on), and
-- at least `BUFF_GCD` (3s) has passed since **any** skill cast (`_lastSkillCast`).
+- at least `buffGcd` (Config window, default 3s) has passed since **any** skill cast (`_lastSkillCast`).
 
 The cast: hold combat for 0.6s (`_castRestartAt`), stop the native engine and movement,
 `player.ClickSkillSlot(slot)`, then **optimistically** set `lastCast = now` and return. One buff per tick.
